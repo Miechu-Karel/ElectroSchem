@@ -53,10 +53,17 @@ _RAW_LIBRARY: dict[str, list[str]] = {
 
 
 _RAW_LIBRARY["Napędy"].append("Serwomechanizm EF90D 360° (praca ciągła)")
+_RAW_LIBRARY["Moduły i interfejsy"].extend(["Łącznik ON/OFF", "Żarówka"])
+_RAW_LIBRARY["Zasilanie i połączenia"].append("Źródło napięcia przemiennego")
 _RAW_LIBRARY["Półprzewodniki"].append("Tranzystor NPN PN2222")
 _RAW_LIBRARY["Zasilanie i połączenia"].append("Konwerter Poziomów Logicznych Iduino ST1167")
 _RAW_LIBRARY["Układy i sterowniki"].append("Przetwornik ADC MCP3008")
+_RAW_LIBRARY["Układy i sterowniki"].extend(["Input", "Output"])
 _RAW_LIBRARY["Moduły i interfejsy"].append("Moduł Przekaźnika 1-kanałowy z optoizolacją 5V")
+from app.libraries.inventory_parts import install as install_inventory
+from app.libraries.pin_catalog import add as add_catalog, terminals
+for category,name in install_inventory(CATALOG,add_catalog,terminals):
+    _RAW_LIBRARY[category].append(name)
 
 # Starsze projekty zachowują definicje i stabilne identyfikatory; porządkowanie
 # menu nigdy nie usuwa symboli, do których odwołuje się istniejący plik ELS.

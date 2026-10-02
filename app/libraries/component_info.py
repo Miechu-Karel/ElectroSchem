@@ -3,6 +3,9 @@ from app.libraries.built_in import item_name
 
 # Para EN/PL pozwala utrzymać treść niezależną od identyfikatorów w ELS.
 SYMBOL_INFO = {
+    "spst": ("An ON/OFF switch opens or closes a single electrical path. Click it in the simulation sandbox to toggle the contact.", "Łącznik ON/OFF rozwiera lub zwiera jeden tor elektryczny. W sandboxie symulacji kliknij go, aby przełączyć styk."),
+    "lamp": ("An incandescent lamp emits light when current heats its filament. The alpha simulator approximates it using its hot resistance, derived from rated power and voltage.", "Żarówka świeci, gdy prąd nagrzewa włókno. Symulator alfa przybliża ją rezystancją gorącego włókna wyznaczoną z mocy i napięcia znamionowego."),
+    "ac_source": ("An AC voltage source periodically reverses polarity. The simulation uses a sine wave whose RMS voltage and frequency are adjustable.", "Źródło napięcia przemiennego okresowo zmienia biegunowość. Symulacja używa sinusoidy z ustawianym napięciem skutecznym RMS i częstotliwością."),
     "resistor": ("A resistor limits current and produces a voltage drop. Its resistance is measured in ohms.", "Rezystor ogranicza prąd i powoduje spadek napięcia. Jego rezystancję podaje się w omach."),
     "capacitor": ("A capacitor stores charge. It is used for filtering, decoupling and timing; capacitance and rated voltage are separate parameters.", "Kondensator gromadzi ładunek. Służy m.in. do filtrowania, odsprzęgania i odmierzania czasu; pojemność i napięcie znamionowe to osobne parametry."),
     "polar_capacitor": ("A polarised capacitor stores charge and must be connected with the correct polarity. Observe its voltage rating.", "Kondensator polaryzowany gromadzi ładunek. Wymaga poprawnej biegunowości i nieprzekraczania napięcia znamionowego."),
@@ -14,6 +17,8 @@ SYMBOL_INFO = {
     "led": ("An LED emits light when forward current flows. It needs current limiting; infrared LEDs emit invisible infrared light.", "LED emituje światło podczas przepływu prądu w kierunku przewodzenia. Wymaga ograniczenia prądu; LED IR emituje niewidzialną podczerwień."),
     "rgb": ("An RGB LED contains separate red, green and blue emitters. Their brightness can be combined to obtain different colours; it has no single fixed colour setting.", "LED RGB zawiera osobne diody czerwoną, zieloną i niebieską. Zmiana ich jasności pozwala mieszać kolory — nie jest to dioda o jednym wybieranym kolorze."),
     "npn": ("An NPN bipolar transistor uses base current to control collector current. It can amplify signals or operate as a switch.", "Tranzystor bipolarny NPN wykorzystuje prąd bazy do sterowania prądem kolektora. Może wzmacniać sygnały lub pracować jako przełącznik."),
+    "logic_input": ("Click in the simulation to switch this ideal logic source between 0 V and 5 V.", "Kliknij w symulacji, aby przełączyć idealne źródło logiczne między 0 V i 5 V."),
+    "logic_output": ("Shows LOW/HIGH relative to the implicit logic ground. It does not short the signal to ground.", "Pokazuje LOW/HIGH względem wewnętrznej masy logicznej. Nie zwiera sygnału do masy."),
     "pnp": ("A PNP bipolar transistor controls emitter-collector current through the base, with polarities opposite to an NPN transistor.", "Tranzystor bipolarny PNP steruje prądem emiter–kolektor przez bazę; biegunowości są przeciwne do tranzystora NPN."),
     "nmos": ("An N-channel MOSFET controls drain-source conduction using gate-source voltage.", "MOSFET z kanałem N steruje przewodzeniem dren–źródło napięciem bramka–źródło."),
     "pmos": ("A P-channel MOSFET controls drain-source conduction using a gate voltage negative relative to its source.", "MOSFET z kanałem P steruje przewodzeniem dren–źródło napięciem bramki ujemnym względem źródła."),
@@ -35,6 +40,19 @@ SYMBOL_INFO = {
 def explanation(definition, language="en", custom=None):
     pl = language == "pl"
     name, symbol = definition.name, definition.symbol
+    if name=="Moduł kamery urządzenia":
+        return ("Lokalny podgląd obrazu z kamery komputera w symulacji. Uruchomienie wymaga jawnej zgody w oknie kamery. Stop lub zamknięcie okna zwalnia kamerę i cofa zgodę. Obraz pozostaje tylko w pamięci; nie jest nagrywany ani wysyłany. VCC i GND są umownymi zaciskami modelu zasilania, nie fizycznym złączem USB/CSI. Nie emuluje sterownika kamery w kodzie płytki." if pl else
+                "Local live computer-camera preview in simulation. Starting requires explicit consent in the camera dialog. Stop or closing releases the camera and revokes consent. Frames remain in memory, without recording or transmission. VCC/GND are abstract power-model terminals, not a USB/CSI connector pinout. This does not emulate a board firmware camera driver.")
+    if name=="Transoptor 4N35":
+        return ("LED steruje światłem fototranzystorem przy separacji elektrycznej. A/K to wejście LED, C/E to kolektor i emiter, B pozwala zmieniać pracę bazy, a NC jest niepodłączony." if pl else "An LED optically drives an electrically isolated phototransistor. A/K are the LED input, C/E are collector/emitter, B exposes the base, and NC is unconnected.")
+    if name=="Zasilacz Raspberry Pi USB-C 27 W":
+        return ("Zasilacz dostarcza energię przez USB-C. Symbol upraszcza go do wyjścia VBUS i masy GND; model daje 5,1 V i zgłasza przekroczenie ustawionego prądu. Nie negocjuje USB PD." if pl else "A USB-C supply powers a device. This symbol exposes only VBUS and GND; its model supplies 5.1 V and reports the configured current limit. USB PD is not negotiated.")
+    if name=="Gniazdo Raspberry Pi 2x20":
+        return ("Złącze ma 40 niezależnych styków, odpowiadających fizycznym numerom złącza Raspberry Pi. Samo nie generuje napięcia i nie łączy pinów ze sobą." if pl else "The socket has 40 independent contacts numbered like the Raspberry Pi physical header. It neither generates voltage nor connects contacts together.")
+    if name=="Moduł nadajnika IR 3-pin":
+        return ("Sterownik diody podczerwonej: VCC/GND zasila moduł, DAT steruje emisją. Sygnał nośny i kodowanie pilota muszą pochodzić ze sterownika; uproszczony model pokazuje aktywność wejścia." if pl else "An infrared LED driver: VCC/GND provide power and DAT controls emission. A controller supplies carrier/remote encoding; the simplified model indicates input activity.")
+    if name=="Matryca RGB WS2812B 16x16":
+        return ("256 adresowalnych diod RGB. DIN odbiera szeregowe dane kolorów, DOUT przekazuje dalsze dane, a 5V/GND zasila matrycę. Model alfa8 obejmuje tylko obciążenie zasilania i licznik zmian sygnału, nie dekoduje kolorów." if pl else "256 addressable RGB LEDs. DIN receives serial colour data, DOUT forwards downstream data, and 5V/GND power the matrix. The alfa8 model only represents supply loading and signal transitions, not colour decoding.")
     if custom:
         notes = "\n\n".join(str(custom.get(k, "")).strip() for k in ("description", "behavior") if custom.get(k))
         return notes or ("Element użytkownika. Nie dodano jeszcze opisu działania." if pl else "User-defined component. No operating description has been provided.")
@@ -55,7 +73,7 @@ def explanation(definition, language="en", custom=None):
     # a aktywny buzzer ma generator, którego nie ma buzzer pasywny.
     descriptions = [
         ("74HC00", "Four independent two-input NAND gates in one IC package.", "Cztery niezależne, dwuwejściowe bramki NAND w jednej obudowie."),
-        ("74HC04", "Six independent inverters: each output is the logical opposite of its input.", "Sześć niezależnych inwerterów: każde wyjście jest negacją swojego wejścia."),
+        ("74HC04", "Six independent NOT gates (inverters). Each channel has one A input and one Y output: A=0 gives Y=1, A=1 gives Y=0. All six gates share VCC and GND. Supply range: 2 to 6 V. Do not leave unused CMOS inputs floating.", "Sześć niezależnych bramek NOT (inwerterów). Każdy kanał ma wejście A i wyjście Y: A=0 daje Y=1, A=1 daje Y=0. Wszystkie bramki mają wspólne zasilanie VCC i GND. Zakres zasilania: od 2 do 6 V. Nieużywane wejścia CMOS nie powinny pozostawać niepodłączone."),
         ("74HC02", "Four two-input NOR gates: output is high only when both inputs are low.", "Cztery dwuwejściowe bramki NOR: wyjście ma stan wysoki tylko przy obu wejściach niskich."),
         ("74HC08", "Four two-input AND gates: output is high only when both inputs are high.", "Cztery dwuwejściowe bramki AND: wyjście ma stan wysoki tylko przy obu wejściach wysokich."),
         ("74HC14", "Six Schmitt-trigger inverters. Hysteresis gives different switching thresholds for rising and falling input voltage.", "Sześć inwerterów Schmitta. Histereza daje różne progi przełączania przy rosnącym i malejącym napięciu wejściowym."),

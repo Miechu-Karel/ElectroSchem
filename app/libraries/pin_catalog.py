@@ -39,6 +39,8 @@ def terminals(*values):
 
 
 # Podstawowe elementy dwukońcówkowe. Nazwy/prefiksy są niezależne od języka GUI.
+add("Input", "Input", terminals((1,"OUT",40,0)), symbol="logic_input", width=80, height=40)
+add("Output", "Output", terminals((1,"IN",-40,0)), symbol="logic_output", width=80, height=40)
 add("Rezystor", "Resistor", prefix="Res", symbol="resistor", unit="Ω")
 add("Kondensator Ceramiczny", "Ceramic Capacitor", prefix="CerCap", symbol="capacitor", unit="F")
 add("Kondensator Elektrolityczny", "Electrolytic Capacitor", "+|−", prefix="EleCap", symbol="polar_capacitor", unit="F")
@@ -126,6 +128,10 @@ for pl, en, part, function in [
     add(pl, en, "1A|1B|1Y|2A|2B|2Y|GND|3Y|3A|3B|4Y|4A|4B|VCC",
         prefix="ic_"+part+"__", symbol="ic", variant=f"{function} logic, DIP-14 / SOIC-14",
         source=TI+"sn"+part.lower()+".pdf", verified=True)
+# HC02 ma wyjście jako pierwszy pin trójki, a HC14 sześć inwerterów.
+# Nie mogą korzystać z kopiowanego pinoutu czterech bramek AND/NAND.
+CATALOG["Bramka Logiczna 74HC02"]["pins"] = "1Y|1A|1B|2Y|2A|2B|GND|3A|3B|3Y|4A|4B|4Y|VCC"
+CATALOG["Bramka Logiczna 74HC14"]["pins"] = "1A|1Y|2A|2Y|3A|3Y|GND|4Y|4A|5Y|5A|6Y|6A|VCC"
 # Pojedyncze symbole funkcji logicznych. To osobne elementy schematowe,
 # niezależne od obudów 74HC, dzięki czemu użytkownik może narysować OR/AND/NOT
 # bez wstawiania prostokątnego modułu płytki.
@@ -296,3 +302,8 @@ for model in ("SG90","MG996R"):
 xiao = CATALOG["Seeed Studio XIAO ESP32-S3 Sense (z kamerą OV3660)"]
 xiao["name_en"] = "Seeed Studio XIAO ESP32-S3 Sense (OV3660 camera)"
 xiao["prefix"] = "mc_" + xiao["name_en"] + "___"
+
+# Elementy podstawowe alfa1: dwa wyprowadzenia, bez ukrytego zasilania.
+add("Łącznik ON/OFF", "ON/OFF Switch", "1|2", symbol="spst", show_pin_numbers=False)
+add("Żarówka", "Incandescent Lamp", "1|2", symbol="lamp", unit="W", show_pin_numbers=False)
+add("Źródło napięcia przemiennego", "AC Voltage Source", "+|−", symbol="ac_source", unit="V", show_pin_numbers=False)

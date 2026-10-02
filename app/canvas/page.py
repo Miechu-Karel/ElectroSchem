@@ -131,35 +131,48 @@ def title_document(value, font, width):
 
 
 def draw_page(painter, sheet, project=None, settings=None, editing_field=None):
+    from app.ui.theme import canvas_colors
+    colours=canvas_colors(settings)
     page = page_rect(sheet)
     painter.save()
     painter.setClipRect(page)
-    painter.fillRect(page, QColor("white"))
     visible = getattr(settings, "grid_visible", True)
+    painter.fillRect(page, QColor(colours["paper"] if visible else colours["faint_paper"]))
     # Wyłączenie w ustawieniach oznacza zgodnie ze specyfikacją przygaszenie,
     # a nie wyłączenie snapowania lub całkowite usunięcie siatki.
-    painter.setPen(QPen(QColor("#e7edf1" if visible else "#f7f8fa"), 0.6))
-    for x in range(0, int(page.width()) + 1, GRID_STEP):
-        painter.drawLine(x, 0, x, int(page.height()))
-    for y in range(0, int(page.height()) + 1, GRID_STEP):
-        painter.drawLine(0, y, int(page.width()), y)
-    painter.setPen(QPen(QColor("#738596"), 0.8))
+    if visible:
+        painter.setPen(QPen(QColor(colours["grid"]), 0.6))
+        for x in range(0, int(page.width()) + 1, GRID_STEP):
+            painter.drawLine(x, 0, x, int(page.height()))
+        for y in range(0, int(page.height()) + 1, GRID_STEP):
+            painter.drawLine(0, y, int(page.width()), y)
+    else:
+        # Kosmetyczne pióro zachowuje czytelny, drobny raster przy
+        # zmianie zoomu. Snap i fizyczny rozstaw 5 mm pozostają bez zmian.
+        pen = QPen(QColor(colours["dots"]), 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        for x in range(0, int(page.width()) + 1, GRID_STEP):
+            for y in range(0, int(page.height()) + 1, GRID_STEP):
+                painter.drawPoint(x, y)
+    painter.setPen(QPen(QColor(colours["frame"]), 0.8))
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawRect(page.adjusted(0.5, 0.5, -0.5, -0.5))
     frame = frame_rect(sheet)
-    painter.setPen(QPen(QColor("#667786"), 1.0))
+    painter.setPen(QPen(QColor(colours["frame"]), 1.0))
     painter.drawRect(frame)
     # Tabliczka jest dopasowana do małych arkuszy. Nie deklarujemy formalnej
     # certyfikacji ISO: przechowujemy jednoznaczne podstawowe pola dokumentu.
     width = min(180 * MM, frame.width())
     block = title_block_rect(sheet)
-    painter.fillRect(block, QColor("white"))
+    painter.fillRect(block, QColor(colours["table"]))
     painter.drawRect(block)
     painter.drawLine(block.left(), block.top() + 40, block.right(), block.top() + 40)
     painter.drawLine(block.left(), block.top() + 80, block.right(), block.top() + 80)
     painter.drawLine(block.left() + width * .65, block.top() + 40, block.left() + width * .65, block.bottom())
     pl = getattr(settings, "language", "en") == "pl"
-    painter.setPen(QColor("#233a4e"))
+    painter.setPen(QColor(colours["ink"]))
     # PixelSize to tutaj jednostki sceny (0,25 mm), nie fizyczne piksele
     # drukarki. PointSize zależałby od DPI PDF i powiększał tekst 3-krotnie.
     for field in ("project", "sheet", "author"):
@@ -173,7 +186,7 @@ def draw_page(painter, sheet, project=None, settings=None, editing_field=None):
         painter.setClipRect(value_rect)
         painter.translate(value_rect.left(), value_rect.top()+max(0, (value_rect.height()-doc.size().height())/2))
         context = QAbstractTextDocumentLayout.PaintContext()
-        context.palette.setColor(QPalette.ColorRole.Text, QColor("#233a4e"))
+        context.palette.setColor(QPalette.ColorRole.Text, QColor(colours["ink"]))
         doc.documentLayout().draw(painter, context)
         painter.restore()
     index, total = 1, 1

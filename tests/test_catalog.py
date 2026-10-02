@@ -20,8 +20,8 @@ BY_NAME = {item.name: item for item in BUILT_IN_ITEMS}
 
 class CatalogTests(unittest.TestCase):
     def test_original_library_is_complete_without_custom_placeholder(self):
-        self.assertEqual(len(BUILT_IN_ITEMS), 134)
-        self.assertEqual(len(ITEM_BY_ID), 134)
+        self.assertEqual(len(BUILT_IN_ITEMS), 152)
+        self.assertEqual(len(ITEM_BY_ID), 152)
         self.assertEqual(set(BY_NAME), {data.get("display_name", name) for name, data in CATALOG.items()})
         self.assertFalse(any(item.category == "Własne" for item in BUILT_IN_ITEMS))
         # Stary zapis nadal daje się otworzyć, ale szablon nie trafia do menu.

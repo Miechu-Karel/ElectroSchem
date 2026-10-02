@@ -1,5 +1,18 @@
 """Tłumaczenia opisów biblioteki; nazwy sygnałów i treść użytkownika zostają bez zmian."""
 PL = {
+    "Local host-camera preview abstraction, not a physical USB/CSI pinout or camera protocol emulator": "Model lokalnego podglądu kamery urządzenia; nie układ pinów USB/CSI ani emulator protokołu kamery",
+    "Grove I2C connector; signal order, not package pin numbering": "Złącze Grove I2C; kolejność sygnałów, nie numeracja obudowy",
+    "Two potentiometers and push switch; verify header order": "Dwa potencjometry i przycisk; sprawdź kolejność pinów złącza",
+    "Grove connector; 38 kHz demodulated output": "Złącze Grove; zdemodulowane wyjście 38 kHz",
+    "Semantic module signals; verify physical order and driver polarity": "Logiczne sygnały modułu; sprawdź kolejność fizyczną i polaryzację sterownika",
+    "3-pin carrier, not the bare 4-pin sensor; verify physical order": "Moduł 3-pinowy, nie sam czujnik 4-pinowy; sprawdź kolejność wyprowadzeń",
+    "256 LEDs, logical power/data endpoints; verify carrier connectors": "256 diod LED, logiczne zaciski zasilania i danych; sprawdź złącza modułu",
+    "4-lead common-anode RGB LED; verify colour pin order": "4-pinowa dioda RGB ze wspólną anodą; sprawdź kolejność pinów kolorów",
+    "GL5528 photoresistor; reference resistance is user-configurable": "Fotorezystor GL5528; rezystancja odniesienia jest ustawiana przez użytkownika",
+    "Vishay DIP-6, with base connection": "Vishay DIP-6, z wyprowadzeniem bazy",
+    "5.1 V DC output abstraction; not a USB-C pinout or USB PD negotiator": "Model wyjścia DC 5,1 V; nie układ pinów USB-C ani negocjator USB PD",
+    "40 independent contacts, physical header numbering; no built-in power sources": "40 niezależnych styków, fizyczna numeracja złącza; bez wbudowanych źródeł zasilania",
+    "40 independent contacts; verify connector orientation": "40 niezależnych styków; sprawdź orientację złącza",
     "Generic terminal arrangement — verify your device": "Ogólny układ wyprowadzeń — sprawdź swój element",
     "All terminals of the specified variant": "Wszystkie wyprowadzenia podanego wariantu",
     "10-bit, 8-channel SPI ADC; PDIP-16": "10-bitowy, 8-kanałowy przetwornik A/C SPI; PDIP-16",

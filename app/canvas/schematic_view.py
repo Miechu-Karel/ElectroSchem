@@ -5,6 +5,7 @@ konkretnym pinem i węzłem, nie z nazwą ani boundingRect komponentu.
 """
 from __future__ import annotations
 from copy import deepcopy
+from dataclasses import replace
 from math import ceil, floor
 from PySide6.QtCore import QByteArray, QMimeData, QLineF, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QCursor, QFont
@@ -16,6 +17,7 @@ from app.canvas.page import (GRID_STEP, draw_page, page_rect, drawing_rect, titl
                              title_field_layout, drawing_contains, fit_component_position, route_allowed)
 from app.libraries.built_in import get_definition
 from app.services.clipboard import MIME_TYPE, encode_selection, decode_selection, prepare_paste
+from app.ui.theme import canvas_colors
 
 PAGE_RECT = QRectF(0, 0, 1188, 840)  # zgodność z dawnymi integracjami; widok używa paper_rect()
 ITEM_DATA_KIND, ITEM_DATA_ID = 0, 1
@@ -26,8 +28,9 @@ class PaperScene(QGraphicsScene):
         self.view = view
 
     def drawBackground(self, painter, rect):
-        painter.fillRect(rect, QColor("#e5ebf0"))
-        draw_page(painter, self.view._sheet, self.view.project, self.view.settings,
+        settings=replace(self.view.settings,theme="light") if getattr(self.view,"_exporting",False) else self.view.settings
+        painter.fillRect(rect, QColor(canvas_colors(settings)["outside"]))
+        draw_page(painter, self.view._sheet, self.view.project, settings,
                   editing_field=self.view._title_field)
 
 class WireItem(QGraphicsPathItem):
@@ -58,10 +61,10 @@ class WireItem(QGraphicsPathItem):
 
     def paint(self, painter, option, widget=None):
         painter.save()
-        painter.setPen(QPen(QColor("#df6b45" if self.isSelected() else "#167d3d"), 2))
+        painter.setPen(QPen(QColor(getattr(self,"selected_color","#df6b45") if self.isSelected() else getattr(self,"ink_color","#167d3d")), 2))
         painter.drawPath(self.path())
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#167d3d"))
+        painter.setBrush(QColor(getattr(self,"ink_color","#167d3d")))
         for point in (self.points[0], self.points[-1]):
             painter.drawEllipse(point, 3, 3)
         painter.restore()
@@ -145,14 +148,26 @@ class SchematicView(QGraphicsView):
         if self._wire_preview:
             self._wire_preview.hide()
         try:
+            self._exporting=True
+            self._apply_scene_colors(replace(self.settings,theme="light"))
             target = target_rect if target_rect is not None else QRectF(painter.viewport())
             self.scene.render(painter, target, self.paper_rect(), Qt.AspectRatioMode.KeepAspectRatio)
         finally:
+            self._exporting=False
+            self._apply_scene_colors(self.settings)
             for item in selected:
                 item.setSelected(True)
             if self._wire_preview:
                 self._wire_preview.show()
             self.scene.blockSignals(False)
+
+    def _apply_scene_colors(self,settings):
+        colours=canvas_colors(settings)
+        for item in self._component_items.values():
+            item.ink_color=colours["ink"]; item.paper_color=colours["paper"]; item.update()
+        for item in self._wire_items.values():
+            item.ink_color=colours["wire"]; item.selected_color=colours["selected"]; item.update()
+        for item in self._comment_items.values(): item.setDefaultTextColor(QColor(colours["ink"]))
 
     def set_tool(self, tool):
         if self._group_drag:
@@ -202,6 +217,8 @@ class SchematicView(QGraphicsView):
                              standard=getattr(self._sheet, "standard", getattr(self.settings, "standard", "EN")),
                              custom_components=self.project.custom_components if self.project else None)
         item.on_position_changed = self._refresh_attached_wires
+        colours=canvas_colors(self.settings)
+        item.ink_color=colours["ink"]; item.paper_color=colours["paper"]
         self._component_items[component.id] = item
         self.scene.addItem(item)
 
@@ -224,7 +241,11 @@ class SchematicView(QGraphicsView):
             raise ValueError("Unknown component / Nieznany element")
         # Rozmiar modułu, nie stałe 80 jednostek, wyznacza wolny obszar. Dzięki
         # temu nawet Mega z pełnymi złączami nie pojawi się poza kartką.
-        preview = ComponentItem(ComponentInstance(library_id, 0, 0, unit=definition.default_unit),
+        from app.core.component_defaults import apply_defaults, nominal_value
+        nominal,unit=nominal_value(definition)
+        preview_component=ComponentInstance(library_id,0,0,value=nominal,unit=unit)
+        apply_defaults(preview_component,self.settings)
+        preview = ComponentItem(preview_component,
                                 language=getattr(self.settings, "language", "en"),
                                 custom_components=self.project.custom_components if self.project else None)
         point = fit_component_position(self._sheet, preview._hit_rect, point)
@@ -232,6 +253,7 @@ class SchematicView(QGraphicsView):
             raise ValueError("Component does not fit this sheet; choose a larger paper size. / Element nie mieści się na arkuszu; wybierz większy format.")
         project = self.project or Project(sheets=[self._sheet])
         component = project.new_component(library_id, point.x(), point.y())
+        apply_defaults(component,self.settings)
         self._sheet.components.append(component)
         self._add_component_item(component)
         self._attach_free_wire_ends_to_component_pins()
@@ -243,6 +265,8 @@ class SchematicView(QGraphicsView):
     def _add_wire_item(self, wire):
         points = [QPointF(*p) for p in wire.points] if wire.points else self._route_45_degrees(QPointF(wire.start_x, wire.start_y), QPointF(wire.end_x, wire.end_y))
         item = WireItem(points)
+        colours=canvas_colors(self.settings)
+        item.ink_color=colours["wire"]; item.selected_color=colours["selected"]
         item.setData(0, "wire")
         item.setData(1, wire.id)
         self._wire_items[wire.id] = item
@@ -250,6 +274,7 @@ class SchematicView(QGraphicsView):
 
     def _add_comment_item(self, comment):
         item = AnnotationItem(comment)
+        item.setDefaultTextColor(QColor(canvas_colors(self.settings)["ink"]))
         self._comment_items[comment.id] = item
         self.scene.addItem(item)
 
@@ -910,6 +935,7 @@ class SchematicView(QGraphicsView):
         if self._annotation_editor is not None:
             self._finish_inline_comment(self._annotation_editor.toPlainText())
         editor = InlineAnnotationEditor(existing.text if existing else "", existing.font_size if existing else 12)
+        editor.setDefaultTextColor(QColor(canvas_colors(self.settings)["ink"]))
         editor.setData(0, "annotation-editor")
         editor.setPos(point)
         self.scene.addItem(editor)
@@ -938,7 +964,7 @@ class SchematicView(QGraphicsView):
         editor = InlineAnnotationEditor(value)
         editor.setTextWidth(rect.width())
         editor.setFont(font)
-        editor.setDefaultTextColor(QColor("#233a4e"))
+        editor.setDefaultTextColor(QColor(canvas_colors(self.settings)["ink"]))
         def align_editor():
             editor.setPos(rect.left(), rect.top()+max(0, (rect.height()-editor.document().size().height())/2))
         editor.document().documentLayout().documentSizeChanged.connect(align_editor)

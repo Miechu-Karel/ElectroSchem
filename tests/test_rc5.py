@@ -44,7 +44,7 @@ class Rc5CatalogTests(unittest.TestCase):
             path = Path(folder) / "legacy.els"
             save_project(path, project)
             self.assertEqual(load_project(path).to_dict(), project.to_dict())
-        self.assertEqual(len(AVAILABLE_ITEMS), 127)
+        self.assertEqual(len(AVAILABLE_ITEMS), 145)
 
     def test_mcp3008_pdip_pinout(self):
         item = BY_NAME["Przetwornik ADC MCP3008"]
@@ -84,13 +84,13 @@ class Rc5WindowTests(unittest.TestCase):
         self.window.deleteLater()
         APP.processEvents()
 
-    def test_every_available_item_has_exactly_one_menu_action(self):
+    def test_every_available_item_has_one_primary_menu_action(self):
         ids = []
         for index in range(5):
             menu = QMenu(self.window)
             self.window._populate_library_menu(menu, index, QPoint(200, 200))
             actions = list(placement_actions(menu))
-            ids.extend(action.data() for action in actions)
+            ids.extend(action.data() for action in actions if not action.property("secondaryEntry"))
             if index == 1:
                 self.assertTrue(any("ef90d" in action.data().lower() for action in actions))
             menu.deleteLater()

@@ -50,8 +50,11 @@ renumbering a pin can leave a wire disconnected. Review connections afterwards.
 ## Electrical checks
 
 EN/PN use the IEC 60617 symbol family; ISO selects the sheet presentation profile.
+These profiles draw rectangular resistors and logic gates; IEEE/ANSI selects
+zigzag resistors and distinctive gate outlines, keeping all pin positions intact.
 These options do not certify standards compliance or electrical correctness.
 
-ElectroSchem 1.0.0 does not simulate circuits. A saved or exported schematic
-still needs checks for polarity, supply voltage, current limiting, device ratings,
-pin assignments and unintended connections.
+The experimental simulator in 1.1.0alfa2 supports only a subset of these drawing
+symbols; see [Simulation limitations](SIMULATION.md). A successful simulation,
+saved project or exported schematic still needs checks for polarity, supply
+voltage, current limiting, device ratings, pin assignments and unintended connections.

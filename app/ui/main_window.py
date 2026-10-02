@@ -24,7 +24,7 @@ from app.core.models import Project, Sheet
 from app.core.project_file import load_project, save_project
 from app.core.settings import AppSettings, default_editor, load_settings, save_settings, file_dialog_directory
 from app.libraries.built_in import BUILT_IN_ITEMS, AVAILABLE_ITEMS, get_definition, item_name
-from app.libraries.menu_groups import subgroup
+from app.libraries.menu_groups import subgroup, library_sort_key, secondary_locations
 from app.core.features import AI_AVAILABLE
 from app.ui.i18n import install_ui_language
 from app.ui.component_dialogs import CustomComponentDialog, ProjectDialog
@@ -35,7 +35,7 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 ICON_DIR = Path(__file__).resolve().parents[2] / "Ikonki"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
@@ -54,6 +54,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self, settings: AppSettings | None = None, start_setup: bool = True):
         super().__init__()
+        # Keep the pixel-art application logo in its original colours in both themes.
+        from app.ui.theme import application_icon
+        self.setWindowIcon(application_icon(ICON_DIR))
         self.settings = settings if settings is not None else load_settings()
         self.project = self._empty_project()
         self.current_file: Path | None = None
@@ -68,6 +71,8 @@ class MainWindow(QMainWindow):
         self.resize(1440, 900)
         self.setStatusBar(QStatusBar(self))
         self._create_actions()
+        from app.ui.effects import install_click_feedback
+        install_click_feedback()
         self._create_component_library()
         self._create_workspace()
         self._create_tools()
@@ -75,21 +80,8 @@ class MainWindow(QMainWindow):
         self._reset_history()
         self.shortcuts = EditorShortcuts(self)
         self._translate_ui()
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background: #f6f9fc; color: #162a3a; }
-            QMenuBar, QMenu, QStatusBar { background: #ffffff; color: #162a3a; }
-            QMenu::item:selected { background: #d8f0f8; color: #102a43; }
-            QToolBar { background: #ffffff; border: 1px solid #d6e1ea; spacing: 6px; padding: 5px; }
-            QToolButton { min-width: 38px; min-height: 38px; border-radius: 5px; color: #162a3a; }
-            QToolButton:hover { background: #e6f3f7; }
-            QToolButton:checked { background: #ccecf5; color: #075a7b; }
-            QToolButton:disabled { color: #8a98a2; }
-            QLineEdit, QTextEdit, QPlainTextEdit, QTableWidget, QComboBox, QSpinBox {
-                background: white; color: #162a3a; selection-background-color: #bce4f0;
-            }
-            QDialogButtonBox QPushButton { min-width: 80px; padding: 5px; }
-            QTabWidget::pane { border: 0; }
-        """)
+        from app.ui.theme import apply_theme
+        apply_theme(self,self.settings)
         # Timer pokazuje konfigurację dopiero po uruchomieniu pętli zdarzeń.
         # Testy i narzędzia mogą jawnie wyłączyć ten jednorazowy dialog.
         if start_setup and not self.settings.setup_complete:
@@ -99,13 +91,16 @@ class MainWindow(QMainWindow):
         return pl if self.settings.language == "pl" else en
 
     def _empty_project(self):
-        return Project(name=self.t("New project", "Nowy projekt"), sheets=[
+        project = Project(name=self.t("New project", "Nowy projekt"), sheets=[
             Sheet(name=self.t("Sheet 1", "Arkusz 1"), paper_size=self.settings.paper_size,
                   orientation=self.settings.orientation, standard=self.settings.standard)])
+        if self.settings.default_author:
+            project.metadata["author"] = self.settings.default_author
+        return project
 
-    @staticmethod
-    def _icon(filename):
-        return QIcon(str(ICON_DIR / filename))
+    def _icon(self,filename):
+        from app.ui.theme import themed_icon
+        return themed_icon(ICON_DIR/filename,self.settings.theme=="dark")
 
     def _action(self, en, pl, callback=None, shortcut=None, icon=None, checkable=False):
         action = QAction(self.t(en, pl), self)
@@ -116,6 +111,7 @@ class MainWindow(QMainWindow):
             action.setShortcut(shortcut)
         if icon:
             action.setIcon(self._icon(icon))
+            action.setProperty("iconFile",icon)
         action.setCheckable(checkable)
         return action
 
@@ -127,9 +123,10 @@ class MainWindow(QMainWindow):
         self.export_pdf_action = self._action("PDF", "PDF", self.export_pdf)
         self.export_png_action = self._action("PNG", "PNG", lambda: self._export("png"))
         self.export_svg_action = self._action("SVG", "SVG", lambda: self._export("svg"))
-        self.help_action = self._action("Help", "Pomoc", self.show_help)
+        self.help_action = self._action("Usage Instructions", "Instrukcja Obsługi", self.show_help)
+        self.component_help_action = self._action("Component help (H)", "Pomoc elementu (H)", self.show_component_info, icon="Pomoc.png")
         self.standard_actions = {}
-        for standard in ("EN", "PN", "ISO"):
+        for standard in ("EN", "PN", "ISO", "IEEE/ANSI"):
             action = self._action(standard, standard, lambda checked=False, value=standard: self.set_sheet_standard(value), checkable=True)
             self.standard_actions[standard] = action
         self.add_sheet_action = self._action("Add sheet (Shift+A, S)", "Dodaj arkusz (Shift+A, S)", self.add_sheet, icon="Dodaj Arkusz.png")
@@ -141,7 +138,7 @@ class MainWindow(QMainWindow):
                                       ("Cut (Ctrl+X)", "Wytnij (Ctrl+X)", "cut"),
                                       ("Copy (Ctrl+C)", "Kopiuj (Ctrl+C)", "copy"),
                                       ("Paste (Ctrl+V)", "Wklej (Ctrl+V)", "paste"))]
-        self.fit_page_action = self._action("Reset zoom / fit sheet", "Zeruj zoom / dopasuj arkusz", self.fit_current_page, icon="Zeruj Zoom.png")
+        self.fit_page_action = self._action("Fit sheet", "Dopasuj arkusz", self.fit_current_page, icon="Zeruj Zoom.png")
         self.select_action = self._action("Select (S)", "Zaznaczanie (S)", lambda: self.set_active_tool("select"), icon="Kursor.png", checkable=True)
         self.wire_action = self._action("Draw connections (D)", "Rysuj połączenia (D)", lambda: self.set_active_tool("wire"), icon="Rysik.png", checkable=True)
         self.delete_action = self._action("Delete tool", "Narzędzie usuwania", lambda: self.set_active_tool("delete"), icon="Usuń v2.png", checkable=True)
@@ -154,11 +151,14 @@ class MainWindow(QMainWindow):
         self.undo_action = self._action("Undo", "Cofnij", self.undo, QKeySequence.StandardKey.Undo, "Cofnij.png")
         self.redo_action = self._action("Redo", "Ponów", self.redo, icon="Ponów.png")
         self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
-        self.properties_action = self._action("Component properties…", "Właściwości elementu…", self.edit_selected_properties)
+        self.properties_action = self._action("Component properties…", "Właściwości elementu…", self.edit_selected_properties, icon="Właściwości.png")
         self.properties_action.setEnabled(False)
         self.custom_action = self._action("Create custom component…", "Utwórz customowy element…", self.create_custom_component, icon="Customowe Elementy.png")
         self.settings_action = self._action("Settings…", "Ustawienia…", lambda: self.show_settings())
-        self.code_action = self._action("Open code in external editor…", "Otwórz kod w zewnętrznym edytorze…", self.open_code)
+        self.code_action = self._action("Edit code…", "Edytuj kod…", self.open_code, icon="Edytuj Kod.png")
+        self.simulation_action = self._action("Simulation sandbox", "Sandbox symulacji", self.show_simulation, "F5", icon="Uruchom Symulację.png")
+        self.add_component_action = self._action("Add component", "Dodaj element", self.open_add_menu, icon="Dodaj element.png")
+        self.search_action = self._action("Find component…", "Wyszukaj element…", self.search_components, icon="Wyszukaj.png")
         self.document_action = self._action("Drawing information…", "Dane tabliczki rysunkowej…", self.edit_document_info)
         self.exit_action = self._action("Exit", "Zakończ", self.close)
         self.library_actions = []
@@ -181,12 +181,18 @@ class MainWindow(QMainWindow):
         edit_menu = self.menuBar().addMenu(self.t("Edit", "Edycja"))
         edit_menu.addActions(self.clipboard_actions)
         tools_menu = self.menuBar().addMenu(self.t("Tools", "Narzędzia"))
-        tools_menu.addActions([self.select_action, self.wire_action, self.delete_action, self.comment_action,
-                               self.undo_action, self.redo_action, self.fit_page_action])
-        tools_menu.addSeparator()
-        tools_menu.addActions([self.properties_action, self.custom_action, self.add_sheet_action, self.code_action])
         library = tools_menu.addMenu(self.t("Add component", "Dodaj element"))
+        library.setIcon(self._icon("Dodaj element.png"))
         library.addActions(self.library_actions)
+        tools_menu.addActions([self.custom_action, self.add_sheet_action, self.comment_action])
+        tools_menu.addSeparator()
+        tools_menu.addActions([self.select_action, self.wire_action, self.delete_action, self.properties_action])
+        tools_menu.addSeparator()
+        tools_menu.addActions([self.undo_action, self.redo_action])
+        tools_menu.addSeparator()
+        tools_menu.addActions([self.search_action, self.fit_page_action])
+        tools_menu.addSeparator()
+        tools_menu.addActions([self.code_action, self.simulation_action])
         options_menu = self.menuBar().addMenu(self.t("Options", "Opcje"))
         options_menu.addActions([self.settings_action, self.help_action])
         standards = options_menu.addMenu(self.t("Sheet standard", "Norma arkusza"))
@@ -240,6 +246,10 @@ class MainWindow(QMainWindow):
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.fit_page_action)
+        self.toolbar.addAction(self.search_action)
+        self.toolbar.addAction(self.component_help_action)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.simulation_action)
         self.addToolBar(Qt.ToolBarArea.RightToolBarArea, self.toolbar)
 
     def _translate_ui(self):
@@ -247,6 +257,7 @@ class MainWindow(QMainWindow):
         for action, (en, pl) in self._action_labels.items():
             action.setText(self.t(en, pl))
             action.setToolTip(self.t(en, pl))
+            if action.property("iconFile"): action.setIcon(self._icon(action.property("iconFile")))
         self.ai_action.setVisible(AI_AVAILABLE)
         self.datasheet_action.setVisible(AI_AVAILABLE)
         self.ai_action.setEnabled(AI_AVAILABLE and bool(self.settings.api_key))
@@ -332,6 +343,9 @@ class MainWindow(QMainWindow):
         """Jedno źródło struktury dla ikon kategorii i wspólnego menu."""
         categories = LIBRARY_GROUPS[index][3]
         entries = [item for item in AVAILABLE_ITEMS if item.category in categories]
+        secondary={item.id:group for item in AVAILABLE_ITEMS for category,group in secondary_locations(item)
+                   if category in categories and item.category not in categories}
+        entries += [item for item in AVAILABLE_ITEMS if item.id in secondary]
         if index == 3:
             entries = [get_definition(entry["id"], self.project.custom_components)
                        for entry in self.project.custom_components]
@@ -339,7 +353,7 @@ class MainWindow(QMainWindow):
         if not entries:
             menu.addAction(self.t("[NONE]", "[BRAK]")).setEnabled(False)
         submenus = {}
-        for item in entries:
+        for item in sorted(entries, key=library_sort_key):
             if index == 3:
                 target = menu.addMenu(item_name(item, self.settings.language))
                 target.addAction(self.t("Edit definition…", "Edytuj definicję…"),
@@ -348,13 +362,17 @@ class MainWindow(QMainWindow):
                                  lambda checked=False, identity=item.id: self.delete_custom_component(identity))
                 target.addSeparator()
             else:
-                group = subgroup(item)
+                group = secondary.get(item.id,subgroup(item))
                 if group not in submenus:
-                    submenus[group] = menu.addMenu(self.t(*group))
+                    from app.ui.library_menu_style import LibrarySubMenu
+                    submenus[group]=LibrarySubMenu(self.t(*group),menu)
+                    menu.addMenu(submenus[group])
                 target = submenus[group]
             action = target.addAction(self.t("Place on sheet", "Umieść na arkuszu") if index == 3 else item_name(item, self.settings.language))
             action.setData(item.id)
-            action.setToolTip(item.variant)
+            action.setProperty("secondaryEntry",item.id in secondary)
+            from app.libraries.catalog_text import catalog_text
+            action.setToolTip(catalog_text(item.variant,self.settings.language))
             # Pozycja jest przechwycona przed otwarciem menu. Przejście przez
             # podkategorie nie przesuwa miejsca wstawienia elementu.
             action.triggered.connect(lambda checked=False, identity=item.id, pos=menu_pos: self.add_component_from_id(identity, global_pos=pos))
@@ -445,6 +463,8 @@ class MainWindow(QMainWindow):
                                              paper_size=dialog.paper.currentText(),
                                              orientation=dialog.orientation.currentData(), standard=self.settings.standard)])
         self.current_file = None
+        if self.settings.default_author:
+            self.project.metadata["author"] = self.settings.default_author
         self._rebuild_tabs(selected=0)
         self._reset_history()
 
@@ -488,8 +508,10 @@ class MainWindow(QMainWindow):
         return self.save_project_as() if self.current_file is None else self._write_project(self.current_file)
 
     def save_project_as(self):
+        self._sync_positions()
+        from app.core.file_names import project_filename
         filename, _ = QFileDialog.getSaveFileName(self, self.t("Save project", "Zapisz projekt"),
-                                                  str(Path(file_dialog_directory(self.settings)) / (self.current_file.name if self.current_file else "project.els")), "ElectroSchem (*.els)")
+                                                  str(Path(file_dialog_directory(self.settings)) / project_filename(self.project.name,"els")), "ElectroSchem (*.els)")
         return self._write_project(Path(filename).with_suffix(".els")) if filename else False
 
     def _sync_positions(self):
@@ -514,6 +536,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self._confirm_discard():
+            if getattr(self, "simulation_window", None):
+                self.simulation_window.close()
             if self.ai_panel:
                 self.ai_panel.cancel()
             event.accept()
@@ -554,6 +578,7 @@ class MainWindow(QMainWindow):
         extra_key = values.pop("extra_key", "")
         extra_value = values.pop("extra_value", "")
         extra_show = values.pop("extra_show", False)
+        component.properties.update(values.pop("simulation_properties", {}))
         for key, value in values.items():
             setattr(component, key, value)
         if extra_key:
@@ -568,6 +593,10 @@ class MainWindow(QMainWindow):
                 self.settings.default_display_names[component.library_id] = text
             else:
                 self.settings.default_display_names.pop(component.library_id, None)
+        if dialog.save_default_values.isChecked():
+            from app.core.component_defaults import value_defaults
+            self.settings.default_component_values[component.library_id]=value_defaults(component)
+        if dialog.save_default_name.isChecked() or dialog.save_default_values.isChecked():
             try:
                 save_settings(self.settings)
             except OSError as error:
@@ -623,6 +652,8 @@ class MainWindow(QMainWindow):
         self.redo_action.setEnabled(bool(self._redo_history))
 
     def _error(self, message):
+        from app.core.messages import localize
+        message=localize(message,self.settings.language)
         QMessageBox.critical(self, self.t("ElectroSchem — error", "ElectroSchem — błąd"), message)
 
     def export_pdf(self):
@@ -630,9 +661,10 @@ class MainWindow(QMainWindow):
 
     def _export(self, kind):
         self._sync_positions()
+        from app.core.file_names import project_filename
         from app.services.export import export_pdf, export_png, export_svg
         filename, _ = QFileDialog.getSaveFileName(self, self.t("Export drawing", "Eksportuj schemat"),
-                                                  str(Path(file_dialog_directory(self.settings)) / ("schematic." + kind)), f"{kind.upper()} (*.{kind})")
+                                                  str(Path(file_dialog_directory(self.settings)) / project_filename(self.project.name,kind)), f"{kind.upper()} (*.{kind})")
         if not filename:
             return
         try:
@@ -660,6 +692,17 @@ class MainWindow(QMainWindow):
             self._error(str(error))
             return
         self.settings = candidate
+        from app.ui.theme import apply_theme
+        apply_theme(self,self.settings)
+        from app.ui.window_mode import show_window
+        show_window(self,self.settings)
+        simulation=getattr(self,"simulation_window",None)
+        if simulation is not None:
+            simulation.fault_animation.stop(); simulation.animate_faults(1)
+            if simulation.fault_sound is not None: simulation.fault_sound.stop()
+            simulation.refresh_theme()
+            simulation.refresh_language()
+            if simulation.isVisible(): show_window(simulation,self.settings)
         if self.ai_panel:
             self.ai_panel.cancel()
             self.ai_panel._consented = False
@@ -810,7 +853,27 @@ class MainWindow(QMainWindow):
         dialog = AiDialog(self.settings, context, apply, self, documentation=documentation)
         dialog.exec()
 
+    def show_simulation(self):
+        from app.ui.simulation_window import SimulationWindow
+        self._sync_positions()
+        window = getattr(self, "simulation_window", None)
+        if window is None:
+            window = SimulationWindow(self)
+            self.simulation_window = window
+            window.destroyed.connect(lambda: setattr(self, "simulation_window", None))
+        from app.ui.window_mode import show_window
+        window.refresh_theme()
+        window.refresh_language()
+        show_window(window,self.settings)
+        window.raise_()
+        window.activateWindow()
+
     def open_code(self):
+        if self._selected_component is not None:
+            from app.libraries.emulator_catalog import profile_for
+            if profile_for(get_definition(self._selected_component.library_id)):
+                self.edit_component_code(self._selected_component)
+                return
         editor = self.settings.editor_path or default_editor()
         if not editor or not Path(editor).is_file():
             self._error(self.t("Select an installed code editor in Settings.", "Wybierz zainstalowany edytor kodu w ustawieniach."))
@@ -824,6 +887,56 @@ class MainWindow(QMainWindow):
             subprocess.Popen([editor, str(Path(filename).resolve())], shell=False)
         except OSError as error:
             self._error(str(error))
+
+    def edit_component_code(self, component):
+        from app.core.board_code import ensure_source
+        try:
+            source = ensure_source(component, self.project)
+            self.record_history()
+            editor = self.settings.editor_path or default_editor()
+            if not editor or not Path(editor).is_file():
+                raise OSError(self.t("Select a code editor in Settings.", "Wybierz edytor kodu w ustawieniach."))
+            subprocess.Popen([editor, str(source)], shell=False)
+        except (OSError, ValueError) as error:
+            self._error(str(error))
+
+    def edit_component_code_folder(self, component):
+        from app.core.board_code import ensure_code_folder
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        try:
+            folder=ensure_code_folder(component,self.project)
+            self.record_history()
+            editor=self.settings.editor_path or default_editor()
+            if editor and Path(editor).is_file() and Path(editor).stem.lower() in {"code","codium","cursor"}:
+                subprocess.Popen([editor,str(folder)],shell=False)
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder))):
+                raise OSError(self.t("Could not open the code folder.","Nie można otworzyć folderu kodu."))
+        except (OSError,ValueError) as error:
+            self._error(str(error))
+
+    def search_components(self):
+        from PySide6.QtWidgets import QListWidget
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.t("Find component", "Wyszukaj element"))
+        layout = QVBoxLayout(dialog)
+        query, results = QLineEdit(), QListWidget()
+        layout.addWidget(query); layout.addWidget(results)
+        position = QCursor.pos()
+        def refresh(text):
+            results.clear()
+            for d in AVAILABLE_ITEMS:
+                label = item_name(d, self.settings.language)
+                if text.casefold() in label.casefold():
+                    results.addItem(label)
+                    results.item(results.count()-1).setData(Qt.ItemDataRole.UserRole, d.id)
+        def place(item):
+            identity = item.data(Qt.ItemDataRole.UserRole)
+            dialog.accept()
+            self.add_component_from_id(identity, global_pos=position)
+        query.textChanged.connect(refresh)
+        results.itemDoubleClicked.connect(place)
+        refresh(""); dialog.resize(460, 500); dialog.exec()
 
     def edit_document_info(self):
         name, ok = QInputDialog.getText(self, self.t("Drawing information", "Dane tabliczki rysunkowej"),
@@ -841,7 +954,7 @@ class MainWindow(QMainWindow):
 
     def set_sheet_standard(self, standard):
         """Zmiana normy bieżącego arkusza bez przeładowywania projektu."""
-        if standard not in {"EN", "PN", "ISO"} or not self.project.sheets:
+        if standard not in {"EN", "PN", "ISO", "IEEE/ANSI"} or not self.project.sheets:
             return
         sheet = self.project.sheets[self.tabs.currentIndex()]
         sheet.standard = standard
@@ -875,14 +988,5 @@ class MainWindow(QMainWindow):
         ComponentInfoDialog(component, definition, self.settings.language, custom, self).exec()
 
     def show_help(self):
-        text = self.t(
-            "Shortcuts:\nS — select, D — draw wire, Del — delete, Ctrl+Z/Y — undo/redo, Ctrl+S — save, Ctrl+Shift+S — save as, Ctrl+N/O — new/open project, Ctrl+A then E/S/I/C/M — add a component category, Shift+A then S — add sheet, R — rotate selected component.\n\nElements and wires are restricted to the drawing area; comments may be placed in margins.",
-            "Skróty:\nS — zaznaczanie, D — przewód, Del — usuń, Ctrl+Z/Y — cofnij/ponów, Ctrl+S — zapisz, Ctrl+Shift+S — zapisz jako, Ctrl+N/O — nowy/otwórz projekt, Ctrl+A potem E/S/I/C/M — dodaj kategorię elementu, Shift+A potem S — dodaj arkusz, R — obrót zaznaczonego elementu.\n\nElementy i przewody są ograniczone do obszaru rysowania; komentarze można umieszczać także na marginesach.")
-        text += self.t("\n\nCtrl+A, A — add anything (all categories).", "\n\nCtrl+A, A — dodaj cokolwiek (wszystkie kategorie).")
-        text += self.t("\nH — information about the selected component.", "\nH — informacje o zaznaczonym elemencie.")
-        text += self.t("\nCtrl+D — duplicate; Ctrl+X/C/V — cut/copy/paste the selection. Paste at the cursor; duplicates are offset by one grid square. Drag a selected object to move the whole group including free wire nodes.",
-                       "\nCtrl+D — duplikuj; Ctrl+X/C/V — wytnij/kopiuj/wklej zaznaczenie. Wklejanie przy kursorze; duplikat jest przesunięty o kratkę. Przeciągnij zaznaczony obiekt, aby przesunąć całą grupę wraz z wolnymi węzłami kabli.")
-        text += self.t(
-            "\n\nMouse: left-click selects an object; hold the middle button to pan; drag the right button to select a rectangle. Right-click cancels a wire in progress. Double-click the project title, sheet name or author in the drawing table to edit it directly. Enter confirms; Shift+Enter adds a line. Double-click a bottom sheet tab to rename or delete it; Ctrl+Z restores a deleted sheet.",
-            "\n\nMysz: LPM wybiera obiekt; wciśnięte kółko przesuwa widok; przeciągnięcie PPM zaznacza prostokątem. PPM anuluje rysowany kabel. Dwuklik nazwy projektu, arkusza lub autora w tabliczce uruchamia edycję na arkuszu. Enter zatwierdza, Shift+Enter dodaje linię. Dwuklik dolnej zakładki pozwala zmienić nazwę lub usunąć arkusz; Ctrl+Z przywraca usunięty arkusz.")
-        QMessageBox.information(self, self.t("Help", "Pomoc"), text)
+        from app.ui.manual_dialog import ManualDialog
+        ManualDialog(self.settings.language,self).exec()

@@ -54,6 +54,11 @@ class AppSettings:
     paper_size: str = "A4"
     orientation: str = "landscape"
     grid_visible: bool = True
+    default_author: str = ""
+    dramatic_faults: bool = False
+    fault_effect: str = "mega"
+    theme: str = "light"
+    window_mode: str = "maximized"
     editor_path: str = ""
     default_directory: str = field(default_factory=documents_directory)
     gemini_model: str = "auto"
@@ -64,6 +69,7 @@ class AppSettings:
     # Preferencje nazwy wyświetlanej są globalne dla biblioteki, a nie dla
     # konkretnego projektu. Kluczem jest stabilne library_id.
     default_display_names: dict[str, str] = field(default_factory=dict)
+    default_component_values: dict[str, dict] = field(default_factory=dict)
 
 
 def _dpapi(data: bytes, *, decrypt: bool = False) -> bytes:
@@ -159,9 +165,9 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
             if legacy.allKeys():
                 store = legacy
     result = AppSettings()
-    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "default_directory"):
+    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "default_directory", "default_author", "window_mode", "theme", "fault_effect"):
         setattr(result, name, str(store.value(name, getattr(result, name))))
-    for name in ("grid_visible", "setup_complete", "ai_chat_consent"):
+    for name in ("grid_visible", "setup_complete", "ai_chat_consent", "dramatic_faults"):
         try:
             setattr(result, name, store.value(name, getattr(result, name), type=bool))
         except (TypeError, ValueError):
@@ -169,12 +175,18 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
             pass
     if result.language not in {"en", "pl"}:
         result.language = "en"
-    if result.standard not in {"EN", "PN", "ISO"}:
+    if result.standard not in {"EN", "PN", "ISO", "IEEE/ANSI"}:
         result.standard = "EN"
     if result.paper_size not in {f"A{i}" for i in range(6)}:
         result.paper_size = "A4"
     if result.orientation not in {"landscape", "portrait"}:
         result.orientation = "landscape"
+    if result.window_mode not in {"windowed","maximized","fullscreen"}: result.window_mode="maximized"
+    if result.theme not in {"light","dark"}: result.theme="light"
+    if not store.contains("fault_effect") and store.contains("dramatic_faults"):
+        result.fault_effect="mega" if result.dramatic_faults else "mini"
+    elif result.fault_effect not in {"mini","medium","mega"}:
+        result.fault_effect="mega" if result.dramatic_faults else "mini"
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", result.gemini_model):
         result.gemini_model = AppSettings().gemini_model
     encrypted = store.value("gemini_key_dpapi", "")
@@ -196,6 +208,12 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
     if isinstance(raw_names, dict):
         result.default_display_names = {str(k): str(v) for k, v in raw_names.items()
                                        if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    raw_values=store.value("default_component_values", "{}")
+    if isinstance(raw_values,str):
+        try: raw_values=json.loads(raw_values)
+        except (ValueError,TypeError): raw_values={}
+    from app.core.component_defaults import validate_defaults
+    result.default_component_values=validate_defaults(raw_values)
     return result
 
 
@@ -204,9 +222,10 @@ def save_settings(settings: AppSettings, store: QSettings | None = None) -> None
     encrypted = base64.b64encode(_dpapi(settings.api_key.encode("utf-8"))).decode("ascii") if settings.api_key else ""
     store = store if store is not None else settings_store()
     for name in ("language", "standard", "paper_size", "orientation", "grid_visible",
-                 "editor_path", "gemini_model", "setup_complete", "default_directory", "ai_chat_consent"):
+                 "editor_path", "gemini_model", "setup_complete", "default_directory", "ai_chat_consent", "default_author", "dramatic_faults", "window_mode", "theme", "fault_effect"):
         store.setValue(name, getattr(settings, name))
     store.setValue("default_display_names", json.dumps(settings.default_display_names, ensure_ascii=False))
+    store.setValue("default_component_values", json.dumps(settings.default_component_values, ensure_ascii=False))
     if encrypted:
         store.setValue("gemini_key_dpapi", encrypted)
     else:

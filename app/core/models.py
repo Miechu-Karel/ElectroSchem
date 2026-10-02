@@ -104,7 +104,7 @@ class Project:
     def _prefix(self, library_id: str) -> str:
         from app.libraries.built_in import get_definition
         definition = get_definition(library_id, self.custom_components)
-        return definition.reference_prefix if definition else "CusEle"
+        return re.sub(r"\s+", ".", definition.reference_prefix) if definition else "CusEle"
 
     def allocate_reference(self, library_id: str) -> str:
         """Minimum trzy cyfry, po 999 naturalnie następuje 1000."""
@@ -121,14 +121,23 @@ class Project:
         definition = get_definition(library_id, self.custom_components)
         if definition is None:
             raise ValueError(f"Unknown component / Nieznany element: {library_id}")
-        return ComponentInstance(library_id, x, y, reference=self.allocate_reference(library_id),
-                                 unit=getattr(definition, "default_unit", ""))
+        from app.core.component_defaults import nominal_value
+        value,unit=nominal_value(definition)
+        return ComponentInstance(library_id, x, y, reference=self.allocate_reference(library_id), value=value,unit=unit)
 
     def ensure_references(self) -> None:
         """Nadaje oznaczenia starszym plikom, nie zmieniając prawidłowych ID."""
         seen, missing = set(), []
+        # Migrate visible references only; UUIDs used by wire anchors stay
+        # stable. Merge counter keys to avoid reusing deleted references.
+        counters = {}
+        for key, value in self.reference_counters.items():
+            key = re.sub(r"\s+", ".", key)
+            counters[key] = max(counters.get(key, 0), value)
+        self.reference_counters = counters
         for sheet in self.sheets:
             for component in sheet.components:
+                component.reference = re.sub(r"\s+", ".", component.reference)
                 prefix = self._prefix(component.library_id)
                 reference = component.reference
                 if not reference or reference in seen:
@@ -161,7 +170,7 @@ class Project:
             ids.add(sheet.id)
             if sheet.paper_size not in PAPER_SIZES_MM or sheet.orientation not in ("portrait", "landscape"):
                 raise ValueError("Invalid sheet size / Niepoprawny format arkusza")
-            if sheet.standard not in {"EN", "PN", "ISO"}:
+            if sheet.standard not in {"EN", "PN", "ISO", "IEEE/ANSI"}:
                 sheet.standard = "EN"
             for key, kind in (("components", ComponentInstance), ("wires", Wire), ("comments", Annotation)):
                 objects = raw.get(key, [])

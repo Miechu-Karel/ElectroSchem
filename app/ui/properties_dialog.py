@@ -1,10 +1,12 @@
 """Właściwości na żądanie: nie zajmują stale miejsca obok arkusza."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QVBoxLayout, QScrollArea, QWidget, QSizePolicy
 from app.core.units import parse_value
 from app.core.led_colors import LED_COLORS, color_key
 from app.libraries.built_in import item_name
 from app.libraries.catalog_text import catalog_text
+from app.libraries.simulation_catalog import behavior_for
+from app.ui.wrapping_label import WrappingLabel
 
 
 class ComponentPropertiesDialog(QDialog):
@@ -16,13 +18,28 @@ class ComponentPropertiesDialog(QDialog):
         self.setWindowTitle(self.t("Component properties", "Właściwości elementu"))
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
-        form = QFormLayout()
-        layout.addLayout(form)
+        # Dodatkowe parametry nie mogą wypchnąć przycisku Zapisz poza ekran.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        fields = QWidget()
+        fields.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        form = QFormLayout(fields)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setVerticalSpacing(8)
+        body_layout.addWidget(fields, 0, Qt.AlignmentFlag.AlignTop)
+        body_layout.addStretch(1)
+        scroll.setWidget(body)
+        layout.addWidget(scroll)
+        self.resize(600, 720)
         reference = QLabel(component.reference)
         reference.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         form.addRow("ID:", reference)
         if definition:
-            title = QLabel(item_name(definition, language))
+            title = WrappingLabel(item_name(definition, language))
             title.setWordWrap(True)
             form.addRow(self.t("Type:", "Typ:"), title)
         self.name = QPlainTextEdit(component.display_name)
@@ -30,8 +47,9 @@ class ComponentPropertiesDialog(QDialog):
         self.name.setPlaceholderText(item_name(definition, language) if definition else "")
         self.show_name = QCheckBox(self.t("Show name", "Wyświetlaj nazwę"))
         self.show_name.setChecked(component.show_name)
-        self.save_default_name = QCheckBox(self.t("Use this as default for new instances", "Używaj jako domyślnej dla nowych elementów"))
-        self.value = QLineEdit(component.value)
+        self.save_default_name = QCheckBox(self.t("Remember this name for new components", "Zapamiętaj nazwę dla nowych elementów"))
+        from app.core.component_defaults import nominal_value
+        self.value = QLineEdit(component.value or nominal_value(definition)[0])
         self.value.setMaxLength(100)
         self.value.setPlaceholderText("300 / 1k / 4.7µF")
         self.unit = QLineEdit(component.unit or (definition.default_unit if definition else ""))
@@ -88,13 +106,49 @@ class ComponentPropertiesDialog(QDialog):
             if self.extra_unit is not None:
                 form.addRow(self.t("Unit:", "Jednostka:"), self.extra_unit)
             form.addRow("", self.extra_show)
+        self.simulation_fields = {}
+        self.save_default_values = QCheckBox(self.t("Remember these values for new components", "Zapamiętaj wartości dla nowych elementów"))
+        from app.libraries.emulator_catalog import profile_for
+        if profile_for(definition):
+            from PySide6.QtWidgets import QPushButton
+            from PySide6.QtGui import QIcon
+            from pathlib import Path
+            self.edit_code_button = QPushButton(self.t("Edit code…", "Edytuj kod…"))
+            self.edit_code_button.setIcon(QIcon(str(Path(__file__).resolve().parents[2]/"Ikonki"/"Edytuj Kod.png")))
+            self.edit_code_button.clicked.connect(lambda: self._edit_board_code(parent))
+            form.addRow(self.edit_code_button)
+            if hasattr(parent,"edit_component_code_folder"):
+                self.code_folder_button=QPushButton(self.t("Create / open code folder…","Utwórz / otwórz folder kodu…"))
+                self.code_folder_button.clicked.connect(lambda: self._edit_board_code(parent,folder=True))
+                form.addRow(self.code_folder_button)
+        model = behavior_for(definition)
+        if model:
+            for parameter in model.parameters:
+                raw = str(component.properties.get(parameter.key, parameter.default))
+                if parameter.choices:
+                    field = QComboBox()
+                    for key, en, pl in parameter.choices:
+                        field.addItem(self.t(en, pl), key)
+                    field.setCurrentIndex(max(0, field.findData(raw)))
+                else:
+                    field = QLineEdit(raw)
+                    field.setMaxLength(100)
+                    field.setPlaceholderText(parameter.unit)
+                self.simulation_fields[parameter.key] = field
+                form.addRow(self.t(parameter.en, parameter.pl) + " (sim):", field)
+            if model.note_en:
+                note = WrappingLabel(self.t(model.note_en, model.note_pl))
+                note.setWordWrap(True)
+                form.addRow(note)
+        if self._has_primary_value or self._extra_key or (model and model.parameters):
+            form.addRow("", self.save_default_values)
         form.addRow(self.t("Description:", "Opis:"), self.description)
         if definition:
-            details = QLabel(catalog_text(definition.variant, language) + "\n" + catalog_text(definition.pin_scope, language))
+            details = WrappingLabel(catalog_text(definition.variant, language) + "\n" + catalog_text(definition.pin_scope, language))
             details.setWordWrap(True)
             form.addRow(self.t("Variant:", "Wariant:"), details)
             if not definition.verified:
-                warning = QLabel(self.t("Verify the pinout against your exact board or package before use.",
+                warning = WrappingLabel(self.t("Verify the pinout against your exact board or package before use.",
                                        "Sprawdź piny z dokumentacją swojej płytki lub obudowy przed użyciem."))
                 warning.setWordWrap(True)
                 layout.addWidget(warning)
@@ -104,6 +158,9 @@ class ComponentPropertiesDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        # Keep short forms compact. The scroll area's stretch absorbs spare
+        # height instead of stretching every QLabel row into a giant gap.
+        self.resize(640, min(720, max(360, fields.sizeHint().height()+120)))
 
     def t(self, en, pl):
         return pl if self.pl else en
@@ -129,6 +186,17 @@ class ComponentPropertiesDialog(QDialog):
         self.extra_unit.setText(unit)
         return True
 
+    def _edit_board_code(self,parent,folder=False):
+        if folder: parent.edit_component_code_folder(self.component)
+        else: parent.edit_component_code(self.component)
+        # Saving this already-open dialog must not restore the old source link.
+        for key in ("sim_source","sim_mode"):
+            field=self.simulation_fields.get(key)
+            value=self.component.properties.get(key)
+            if field is not None and value is not None:
+                if isinstance(field,QComboBox): field.setCurrentIndex(max(0,field.findData(value)))
+                else: field.setText(value)
+
     def accept(self):
         if self.extra_unit is not None and not self.normalize_extra_value():
             QMessageBox.warning(self, self.windowTitle(), self.t("Enter a voltage, e.g. 25 V.", "Podaj napięcie, np. 25 V."))
@@ -147,4 +215,7 @@ class ComponentPropertiesDialog(QDialog):
                            extra_key=self._extra_key,
                            extra_value=extra,
                            extra_show=self.extra_show.isChecked() if self.extra_show is not None else False)
+        self.values["simulation_properties"] = {
+            key: field.currentData() if isinstance(field, QComboBox) else field.text().strip()
+            for key, field in self.simulation_fields.items()}
         super().accept()

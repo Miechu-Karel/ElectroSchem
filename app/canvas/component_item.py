@@ -79,6 +79,8 @@ class ComponentItem(QGraphicsObject):
             "ground": (-20, -20, 40, 40), "power": (-20, -20, 40, 40),
             "relay": (-100, -40, 200, 80), "opto": (-80, -40, 160, 80),
             "rgb": (-80, -60, 160, 120), "motor": (-80, -40, 160, 80),
+            "logic_input": (-20, -20, 60, 40),
+            "logic_output": (-40, -20, 60, 40),
         }
         if definition.symbol.startswith("gate_"):
             return QRectF(-20, -20, 40, 40)
@@ -229,7 +231,7 @@ class ComponentItem(QGraphicsObject):
         d, r = self.definition, self._hit_rect
         top_pins = any(abs(pin.y-r.top()) < .1 for pin in d.pins)
         body = r.adjusted(20, 20 if top_pins or len(d.pins)>8 else 0, -20, -20)
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor(getattr(self, "paper_color", "#ffffff")))
         p.drawRect(body)
         p.setBrush(Qt.BrushStyle.NoBrush)
         font = QFont("Arial")
@@ -357,11 +359,12 @@ class ComponentItem(QGraphicsObject):
             line(-30,0,38,0)
             p.restore()
         elif s == "rgb":
-            # Trzy diody we wspólnej obudowie, wspólna katoda zgodnie z wariantem.
+            common_anode=any(pin.name=="A" for pin in self.definition.pins)
             for y in (-40,0,40):
                 line(-80,y,-20,y)
-                p.drawPolygon(QPolygonF([QPointF(-20,y-8),QPointF(-20,y+8),QPointF(-4,y)]))
-                line(-4,y-9,-4,y+9); line(-4,y,40,y)
+                base,tip=(-4,-20) if common_anode else (-20,-4)
+                p.drawPolygon(QPolygonF([QPointF(base,y-8),QPointF(base,y+8),QPointF(tip,y)]))
+                line(tip,y-9,tip,y+9); line(-4,y,40,y)
                 self._arrow(p,QPointF(-8,y-11),QPointF(3,y-22),3.5)
                 self._arrow(p,QPointF(0,y-8),QPointF(11,y-19),3.5)
             line(40,-40,40,40); line(40,0,80,0)
@@ -424,7 +427,13 @@ class ComponentItem(QGraphicsObject):
             if s=="potentiometer":line(-40,0,-20,0);line(20,0,40,0)
             # Prostokąt jest wariantem europejskim; PN wdrażająca EN używa
             # tego samego rysunku, nie amerykańskiego zygzaka.
-            p.drawRect(QRectF(-20,-7,40,14))
+            if self.standard == "IEEE/ANSI":
+                path=QPainterPath(QPointF(-20,0))
+                for x,y in ((-16,-7),(-8,7),(0,-7),(8,7),(16,-7),(20,0)):
+                    path.lineTo(x,y)
+                p.drawPath(path)
+            else:
+                p.drawRect(QRectF(-20,-7,40,14))
             if s=="potentiometer":self._arrow(p,QPointF(0,-40),QPointF(0,-8))
             if s=="thermistor":line(-15,12,15,-12);line(-15,12,-21,12)
             if s=="ldr":
@@ -477,6 +486,21 @@ class ComponentItem(QGraphicsObject):
             line(-20,0,-7,0);line(7,0,20,0)
             line(-7,-16,-7,16);line(7,-8,7,8)
             line(-18,-22,-10,-22);line(-14,-26,-14,-18)
+        elif s in {"lamp", "ac_source"}:
+            line(-40,0,-16,0);line(16,0,40,0)
+            p.drawEllipse(QRectF(-16,-16,32,32))
+            if s == "lamp":
+                line(-11,-11,11,11);line(-11,11,11,-11)
+            else:
+                path=QPainterPath(QPointF(-11,0))
+                path.cubicTo(-7,-16,-4,-16,0,0)
+                path.cubicTo(4,16,7,16,11,0)
+                p.drawPath(path)
+        elif s=="spst":
+            line(-40,0,-20,0);line(20,0,40,0)
+            closed = self.component.properties.get("sim_closed", "false") == "true"
+            line(-20,0,20,0 if closed else -15)
+            p.drawEllipse(QPointF(-20,0),2,2);p.drawEllipse(QPointF(20,0),2,2)
         elif s=="ground":
             line(0,-20,0,0);line(-13,0,13,0);line(-8,5,8,5);line(-3,10,3,10)
         elif s=="power":
@@ -485,10 +509,13 @@ class ComponentItem(QGraphicsObject):
             line(-40,0,-20,0);line(20,0,40,0)
             line(-40,20,-30,20);line(-30,20,-30,0)
             line(40,20,30,20);line(30,20,30,0)
-            line(-20,-10,20,-10);line(0,-10,0,-20)
+            pressed=self.component.properties.get("sim_closed","false")=="true"
+            level=0 if pressed else -10
+            line(-20,level,20,level);line(0,level,0,level-10)
             p.drawEllipse(QPointF(-20,0),2,2);p.drawEllipse(QPointF(20,0),2,2)
         elif s=="spdt":
-            line(-40,0,-20,0);line(-20,0,15,-16)
+            selected=self.component.properties.get("sim_closed","false")=="true"
+            line(-40,0,-20,0);line(-20,0,15,16 if selected else -16)
             line(20,-20,40,-20);line(20,20,40,20)
             p.drawEllipse(QPointF(20,-20),2,2);p.drawEllipse(QPointF(20,20),2,2)
         elif s=="buzzer":
@@ -511,6 +538,22 @@ class ComponentItem(QGraphicsObject):
         pen.setWidthF(2.7)
         p.setPen(pen)
         line = lambda a,b,c,d: self._line(p,a,b,c,d)
+        if self.standard != "IEEE/ANSI":
+            p.drawRect(QRectF(-28,-25,50,50))
+            symbol="&" if kind in {"and","nand"} else ">=1" if kind in {"or","nor"} else "=1" if kind in {"xor","xnor"} else "1"
+            font=QFont("Arial"); font.setPixelSize(18); p.setFont(font)
+            p.drawText(QRectF(-27,-24,48,48),Qt.AlignmentFlag.AlignCenter,symbol)
+            for y in ((0,) if kind=="not" else (-20,20)):
+                line(-40,y,-28,y)
+            if kind in {"not","nand","nor","xnor"}:
+                p.drawEllipse(QPointF(27,0),5,5); line(32,0,40,0)
+            else:
+                line(22,0,40,0)
+            p.restore()
+            if kind != "not":
+                self._line(p,-20,-20,-20,-10); self._line(p,-20,20,-20,10)
+            self._bottom_labels(p)
+            return
         if kind == "not":
             p.drawPolygon(QPolygonF([QPointF(-24,-24), QPointF(-24,24), QPointF(24,0)]))
             p.drawEllipse(QPointF(29,0), 5, 5)
@@ -657,8 +700,9 @@ class ComponentItem(QGraphicsObject):
     @classmethod
     def _draw_fitted_label(cls, painter, text, rect, centered=False):
         painter.save()
+        ink = painter.pen().color()
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#163247"))
+        painter.setBrush(ink)
         painter.drawPath(cls._label_path(text, rect, centered))
         painter.restore()
 
@@ -684,10 +728,27 @@ class ComponentItem(QGraphicsObject):
 
     def paint(self,painter,option,widget=None):
         painter.save()
-        color=QColor("#163247")
+        color=QColor(getattr(self, "ink_color", "#163247"))
         painter.setPen(QPen(color,1.35,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        if self.definition.symbol.startswith("gate_"):
+        if self.definition.symbol in {"logic_input", "logic_output"}:
+            live_logic = hasattr(self, "logic_label")
+            painter.drawRect(QRectF(-20,-20,40,40))
+            if self.definition.symbol == "logic_input":
+                painter.drawLine(QPointF(20,0),QPointF(40,0))
+            else:
+                painter.drawLine(QPointF(-40,0),QPointF(-20,0))
+            painter.save()
+            if live_logic:
+                font = painter.font(); font.setPixelSize(28); font.setBold(True)
+                painter.setFont(font)
+                if self.logic_label == "1": painter.setPen(QColor("#ffffff"))
+            if int(round(self.rotation())) % 360 in (90,180): painter.rotate(180)
+            painter.drawText(QRectF(-20,-20,40,40), Qt.AlignmentFlag.AlignCenter,
+                             getattr(self, "logic_label", "IN" if self.definition.symbol == "logic_input" else "OUT"))
+            painter.restore()
+            self._bottom_labels(painter)
+        elif self.definition.symbol.startswith("gate_"):
             self._logic_gate(painter)
         elif self.definition.symbol in {"relay","rgb","motor","opto"}:
             self._device_symbol(painter)
@@ -698,7 +759,7 @@ class ComponentItem(QGraphicsObject):
             self._bottom_labels(painter)
         # Niezajęty pin to drobny pusty okrąg. Duże zielone węzły należą do
         # przewodów i nie mogą mylić się z samym elektrycznym wyprowadzeniem.
-        painter.setBrush(QColor("white"))
+        painter.setBrush(QColor(getattr(self, "paper_color", "white")))
         for pin in self.definition.pins:
             painter.drawEllipse(QPointF(pin.x,pin.y),1.6,1.6)
         if self.isSelected():

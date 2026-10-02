@@ -6,3 +6,5 @@ output/
 *.els
 *.log
 .env
+node_modules/
+.tools/

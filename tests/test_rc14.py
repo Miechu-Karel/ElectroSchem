@@ -29,7 +29,7 @@ class Rc14Tests(unittest.TestCase):
         APP.processEvents()
 
     def test_no_ai_actions_with_legacy_key_in_both_languages(self):
-        self.assertEqual(APP_VERSION, "1.0.0")
+        self.assertEqual(APP_VERSION, "1.1.0")
         for language in ("en", "pl"):
             self.window.settings.language = language
             self.window._translate_ui()
@@ -74,9 +74,14 @@ class Rc14Tests(unittest.TestCase):
     def test_help_does_not_advertise_retired_features(self):
         for language in ("en", "pl"):
             self.window.settings.language = language
-            with patch("app.ui.main_window.QMessageBox.information") as box:
+            from app.ui.manual_dialog import ManualDialog
+            captured=[]
+            def capture(dialog):
+                captured.append(dialog.browser.toPlainText())
+                return 0
+            with patch.object(ManualDialog,"exec",capture):
                 self.window.show_help()
-            text = box.call_args.args[2]
+            text = captured[0]
             self.assertNotIn("AI", text)
             self.assertNotIn("datasheet", text)
             self.assertNotIn("dokumentacji", text)
