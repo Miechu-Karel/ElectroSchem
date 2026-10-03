@@ -118,7 +118,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe main.py
 ```
 
-Alternatively, `uruchom_electroschem.bat` launches Python from
+Alternatively, `Lunch_ElectroSchem.bat` launches Python from
 `%LOCALAPPDATA%\Programs\Python\Python314\python.exe`.
 That interpreter must also have the required dependencies installed.
 
