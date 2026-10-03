@@ -35,7 +35,7 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 ICON_DIR = Path(__file__).resolve().parents[2] / "Ikonki"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
@@ -888,10 +888,22 @@ class MainWindow(QMainWindow):
         except OSError as error:
             self._error(str(error))
 
+    def _new_code_destination(self,component):
+        if component.properties.get("sim_source", "").strip(): return None
+        from app.core.board_code import default_source_filename
+        filename=default_source_filename(component,self.project)
+        folder=Path(self.settings.default_code_directory or default_code_directory())
+        filter="Arduino (*.ino)" if filename.endswith('.ino') else "Python (*.py)"
+        selected,_=QFileDialog.getSaveFileName(self,self.t("Create and Assign Code","Utwórz i Przypisz Kod"),
+            str(folder/filename),filter,options=QFileDialog.Option.DontConfirmOverwrite)
+        return selected
+
     def edit_component_code(self, component):
         from app.core.board_code import ensure_source
+        destination=self._new_code_destination(component)
+        if destination == "": return
         try:
-            source = ensure_source(component, self.project, self.settings.default_code_directory or default_code_directory())
+            source = ensure_source(component, self.project, self.settings.default_code_directory or default_code_directory(), destination=destination)
             self.record_history()
             editor = self.settings.editor_path or default_editor()
             if not editor or not Path(editor).is_file():
@@ -904,8 +916,10 @@ class MainWindow(QMainWindow):
         from app.core.board_code import ensure_code_folder
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
+        destination=self._new_code_destination(component)
+        if destination == "": return
         try:
-            folder=ensure_code_folder(component,self.project,self.settings.default_code_directory or default_code_directory())
+            folder=ensure_code_folder(component,self.project,self.settings.default_code_directory or default_code_directory(),destination=destination)
             self.record_history()
             editor=self.settings.editor_path or default_editor()
             if editor and Path(editor).is_file() and Path(editor).stem.lower() in {"code","codium","cursor"}:

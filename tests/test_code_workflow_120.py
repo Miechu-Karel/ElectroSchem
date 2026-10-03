@@ -10,7 +10,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication,QFormLayout,QLineEdit
 from app.core.settings import AppSettings,default_code_directory,load_settings,save_settings
-from app.core.board_code import ensure_source,assign_source
+from app.core.board_code import ensure_source,assign_source,default_source_filename
 from app.core.models import Project,Sheet
 from app.core.project_file import save_project,load_project
 from app.libraries.built_in import get_definition
@@ -133,8 +133,9 @@ class CodeWorkflow120Tests(unittest.TestCase):
                 board=component('Raspberry Pi 5',500,400)
                 window.project.sheets=[Sheet(components=[board])]; window._rebuild_tabs()
                 dialog=ComponentPropertiesDialog(board,get_definition(board.library_id),'pl',window)
-                with patch('app.ui.main_window.subprocess.Popen') as launch:
+                with patch('app.ui.main_window.subprocess.Popen') as launch,patch('app.ui.main_window.QFileDialog.getSaveFileName',side_effect=lambda *args,**kwargs:(args[2],'')) as picker:
                     dialog.edit_code_button.click()
+                self.assertEqual(picker.call_args.args[2],str(chosen/default_source_filename(board,window.project)))
                 source=Path(board.properties['sim_source'])
                 self.assertTrue(source.is_relative_to(chosen))
                 self.assertEqual(source.read_bytes(),b'')
@@ -182,6 +183,73 @@ class CodeWorkflow120Tests(unittest.TestCase):
                 if dialog: dialog.deleteLater()
                 with patch.object(window,'_confirm_discard',return_value=True): window.close()
                 window.deleteLater(); APP.processEvents()
+
+    def test_custom_names_extensions_and_collision_preserve_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            project=Project(); board=component('Raspberry Pi 5',500,400)
+            source=ensure_source(board,project,folder,'Migające LEDy.py')
+            self.assertEqual(source.name,'Migające LEDy.py')
+            self.assertTrue(source.is_relative_to(Path(folder)/project.id.replace('-','')))
+            source.write_text('# keep this code\n')
+            board.properties.pop('sim_source')
+            with self.assertRaises(ValueError): ensure_source(board,project,folder,'Migające LEDy')
+            self.assertEqual(source.read_text(),'# keep this code\n')
+            self.assertNotIn('sim_source',board.properties)
+            arduino=component('Arduino Uno R3',300,300)
+            self.assertEqual(ensure_source(arduino,project,folder,'blink').name,'blink.ino')
+
+    def test_invalid_names_create_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/'not-created'; project=Project()
+            for name in ('../escape','C:\\escape','bad:name','CON','NUL.py','..','blink.ino'):
+                with self.subTest(name=name):
+                    board=component('Raspberry Pi 5',500,400)
+                    with self.assertRaises(ValueError): ensure_source(board,project,target,name)
+                    self.assertFalse(target.exists())
+                    self.assertNotIn('sim_source',board.properties)
+
+    def test_save_dialog_name_location_cancel_and_existing_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); editor=root/'editor.exe'; editor.touch()
+            target=root/'code'
+            window=MainWindow(AppSettings(language='pl',window_mode='windowed',editor_path=str(editor),default_code_directory=str(target)),start_setup=False)
+            try:
+                board=component('Raspberry Pi 5',500,400)
+                with patch('app.ui.main_window.QFileDialog.getSaveFileName',return_value=('','')),patch('app.ui.main_window.subprocess.Popen') as launch:
+                    window.edit_component_code(board)
+                    window.edit_component_code_folder(board)
+                    launch.assert_not_called()
+                self.assertNotIn('sim_source',board.properties)
+                self.assertFalse(target.exists())
+                selected=root/'chosen elsewhere'/'Mój program.py'
+                with patch('app.ui.main_window.QFileDialog.getSaveFileName',return_value=(str(selected),'')),patch('app.ui.main_window.subprocess.Popen') as launch:
+                    window.edit_component_code(board)
+                    launch.assert_called_once()
+                source=Path(board.properties['sim_source'])
+                self.assertEqual(source.name,'Mój program.py')
+                self.assertEqual(source,selected)
+                self.assertFalse(target.exists())
+                with patch('app.ui.main_window.QFileDialog.getSaveFileName') as prompt,patch('app.ui.main_window.subprocess.Popen'):
+                    window.edit_component_code(board)
+                    prompt.assert_not_called()
+                self.assertEqual(source.read_bytes(),b'')
+            finally:
+                with patch.object(window,'_confirm_discard',return_value=True): window.close()
+                window.deleteLater(); APP.processEvents()
+
+    def test_exact_destination_extension_and_existing_file_protection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); project=Project()
+            board=component('Raspberry Pi 5',500,400)
+            selected=root/'selected folder'/'blink'
+            source=ensure_source(board,project,root/'default',destination=selected)
+            self.assertEqual(source,selected.with_suffix('.py'))
+            self.assertFalse((root/'default').exists())
+            source.write_text('# preserve\n')
+            board.properties.pop('sim_source')
+            with self.assertRaises(ValueError): ensure_source(board,project,destination=source)
+            self.assertEqual(source.read_text(),'# preserve\n')
+            self.assertNotIn('sim_source',board.properties)
 
     def test_long_code_path_does_not_widen_properties_form(self):
         board=component('Raspberry Pi 5',500,400,sim_source='C:\\'+('a_very_long_folder_name_'*40)+'\\main.py')

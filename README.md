@@ -1,17 +1,28 @@
 # ElectroSchem
 
-**ElectroSchem 1.2.0** is an offline desktop editor for electronic schematics,
+**ElectroSchem 1.2.1** is an offline desktop editor for electronic schematics,
 built with Python and PySide6 (Qt). Draw circuits, connect components and
 prepare documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
 
+### Stable release 1.2.1
+
+Version 1.2.1 promotes the tested 1.2.1rc1 without functional changes.
+
+Creating board code now opens a Save dialog for both filename and location.
+The suggested filename contains the component/project ID, and the initial
+folder follows the code-folder preference. Accept the suggestion or choose
+your own name and destination. The board determines the `.py` or `.ino`
+extension. Cancel creates nothing; existing assigned code opens directly.
+Selected destinations never overwrite existing files.
+
 ### Stable release 1.2.0
 
 Version 1.2.0 promotes 1.2.0rc1 without functional changes. Portable Windows
 releases are available on the `biults` branch under `biult/1.1.1` and
-`biult/1.2.0`. Keep each EXE with its matching `_internal` directory. The `main`
+`biult/1.2.0`, with the latest patch in `biult/1.2.1`. Keep each EXE with its matching `_internal` directory. The `main`
 branch contains source code, not portable build folders.
 
 ### 1.2.0rc1 changes

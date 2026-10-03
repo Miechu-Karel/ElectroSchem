@@ -1,5 +1,7 @@
 """Single-language presentation of legacy and new diagnostic messages."""
 PAIRS = (
+    ("Enter a valid code filename, without a folder path.","Podaj poprawną nazwę pliku kodu, bez ścieżki folderu."),
+    ("The code filename extension does not match this board.","Rozszerzenie nazwy pliku kodu nie pasuje do tej płytki."),
     ("Detach the assigned code before assigning another source file.","Odłącz przypisany kod przed przypisaniem innego pliku."),
     ("Arduino .ino compilation/emulation supports Uno R3 and classic Nano only.","Kompilacja i emulacja Arduino .ino obsługuje tylko Uno R3 i klasyczne Nano."),
     ("Arduino CLI is missing. Install arduino-cli and the arduino:avr core.","Brak Arduino CLI. Zainstaluj arduino-cli i rdzeń arduino:avr."),

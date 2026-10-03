@@ -107,7 +107,7 @@ class Alpha10Tests(unittest.TestCase):
                 editor=Path(directory)/"Code.exe"; editor.touch(); window.settings.editor_path=str(editor)
                 window.settings.default_code_directory=directory
                 board=component("Raspberry Pi 5",100,100)
-                with patch("app.ui.main_window.subprocess.Popen") as launch:
+                with patch("app.ui.main_window.subprocess.Popen") as launch,patch("app.ui.main_window.QFileDialog.getSaveFileName",return_value=(str(Path(directory)/"main.py"),"")):
                     window.edit_component_code_folder(board)
                     launch.assert_called_once_with([str(editor),board.properties["sim_code_folder"]],shell=False)
         finally:
@@ -133,7 +133,7 @@ class Alpha10Tests(unittest.TestCase):
         try:
             window.project.sheets=[example("dc")]; window._rebuild_tabs(); window.show_simulation(); sim=window.simulation_window
             before=deepcopy(window.project.to_dict())
-            self.assertIn("1.2.0",sim.windowTitle())
+            self.assertIn("1.2.1",sim.windowTitle())
             self.assertEqual(sim.windowIcon().cacheKey(),window.windowIcon().cacheKey())
             for theme in ("light","dark","light"):
                 window.settings.theme=theme; sim.refresh_theme(); window._current_view().apply_settings(window.settings)

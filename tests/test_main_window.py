@@ -36,7 +36,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_version_localization_icons_and_no_properties_dock(self):
         window = self.window
-        self.assertEqual(APP_VERSION, "1.2.0")
+        self.assertEqual(APP_VERSION, "1.2.1")
         self.assertFalse(window.windowIcon().isNull())
         self.assertEqual({size.width() for size in window.windowIcon().availableSizes()},
                          {72,144,432,576})

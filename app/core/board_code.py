@@ -13,7 +13,14 @@ def project_code_id(project):
     return UUID(project.id).hex
 
 
-def ensure_source(component, project=None, code_directory=None):
+def default_source_filename(component,project):
+    definition=get_definition(component.library_id)
+    extension='.ino' if definition and definition.name in {'Arduino Uno R3','Arduino Nano'} else '.py'
+    reference=re.sub(r'[\s<>:"/\\|?*\x00-\x1f]+', '.', component.reference).strip('. ')
+    return (reference or 'MC')+'_'+project_code_id(project)+'_code'+extension
+
+
+def ensure_source(component, project=None, code_directory=None, source_name="", destination=None):
     existing=component.properties.get("sim_source", "")
     definition=get_definition(component.library_id)
     reference=re.sub(r'[\s<>:"/\\|?*\x00-\x1f]+', '.', component.reference).strip('. ')
@@ -27,18 +34,36 @@ def ensure_source(component, project=None, code_directory=None):
         # Existing links (including legacy names and multi-file folders) stay
         # untouched. Never move an entry point away from its helper modules.
         return path
+    target=Path(destination).expanduser() if destination is not None else None
+    if target is not None and not target.is_absolute():
+        raise ValueError("Code folder must be an absolute path")
+    custom=target.name if target is not None else source_name.strip()
+    if custom:
+        if (re.search(r'[<>:"/\\|?*\x00-\x1f]',custom) or custom.endswith('.')
+                or custom.split('.')[0].upper() in {'CON','PRN','AUX','NUL',
+                    *(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}):
+            raise ValueError("Enter a valid code filename, without a folder path.")
+        if Path(custom).suffix.lower() in {'.py','.ino'}:
+            if Path(custom).suffix.lower()!=extension:
+                raise ValueError("The code filename extension does not match this board.")
+            custom=custom[:-len(extension)]
+        if not custom or custom in {'.','..'}:
+            raise ValueError("Enter a valid code filename, without a folder path.")
+        filename=custom+extension
     definition=get_definition(component.library_id)
     pins=[a for p in definition.pins if (a:=gpio_alias(p.name))]
     if not pins: raise ValueError("No programmable GPIO pins in this definition")
     pin=next((p for p in ("GPIO12","D13","GP0") if p in pins),pins[0])
     # Explicit location is supplied by the UI's separate code-folder setting.
     # The old default remains for legacy callers without settings.
-    root=Path(code_directory).expanduser() if code_directory is not None else appdata_directory()/"code"
+    root=target.parent if target is not None else Path(code_directory).expanduser() if code_directory is not None else appdata_directory()/"code"
     if not root.is_absolute(): raise ValueError("Code folder must be an absolute path")
     identity=sha256(component.id.encode()).hexdigest()[:24]
-    folder=root/project_id/identity if project_id else root/identity
-    folder.mkdir(parents=True, exist_ok=True)
+    folder=root if target is not None else root/project_id/identity if project_id else root/identity
     path=folder/filename
+    if (source_name.strip() or target is not None) and path.exists():
+        raise ValueError("Code destination already exists; existing files were kept: "+str(path))
+    folder.mkdir(parents=True, exist_ok=True)
     legacy=root/(identity+extension) if project is None else None
     # Exclusive creation preserves code from an earlier session, even when
     # an older copy of the ELS file does not yet contain the source link.
@@ -67,9 +92,9 @@ def ensure_source(component, project=None, code_directory=None):
     return path
 
 
-def ensure_code_folder(component, project, code_directory=None):
+def ensure_code_folder(component, project, code_directory=None, source_name="", destination=None):
     """Create an editable multi-file workspace; never replace existing files."""
-    source=ensure_source(component, project, code_directory)
+    source=ensure_source(component, project, code_directory, source_name, destination)
     folder=source.parent if component.properties.get("sim_code_folder")==str(source.parent) else source.parent/source.stem
     folder.mkdir(parents=True,exist_ok=True)
     entry=folder/source.name

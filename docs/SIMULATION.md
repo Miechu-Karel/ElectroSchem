@@ -1,4 +1,15 @@
-# Simulation - 1.2.0
+# Simulation - 1.2.1
+
+## Stable release 1.2.1
+
+Version 1.2.1 promotes the tested 1.2.1rc1 without functional changes.
+
+- Creating code or a new board workspace opens a Save dialog for filename and
+  location, initially suggesting the component/project-ID name in the default
+  code folder. Choose any destination or accept the suggestion. Cancelling
+  creates no files or assignment. Existing code opens without prompting.
+- Custom filenames keep the board's `.py`/`.ino` extension and never overwrite
+  an existing file. The selected source is created at the chosen location.
 
 ## Stable release 1.2.0
 
