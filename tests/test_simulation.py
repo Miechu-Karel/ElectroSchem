@@ -130,7 +130,7 @@ class SimulationTests(unittest.TestCase):
 
     def test_switch_on_off_and_lamp(self):
         source=component("Bateria 9V",100,100,"5")
-        switch=component("Łącznik ON/OFF",400,100)
+        switch=component("Łącznik",400,100)
         lamp=component("Żarówka",600,200,"1",sim_rated_voltage="5 V")
         c=Circuit(loop(source,switch,lamp))
         self.assertLess(c.step().brightness[lamp.id],1e-10)

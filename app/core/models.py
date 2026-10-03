@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field, fields
 import math
 import re
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from datetime import datetime
 
 FORMAT_VERSION = 3
@@ -97,6 +97,7 @@ class Project:
     reference_counters: dict[str, int] = field(default_factory=dict)
     metadata: dict[str, str] = field(default_factory=lambda: {
         "modified_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    id: str = field(default_factory=new_id)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -237,9 +238,20 @@ class Project:
                 raise ValueError("Duplicate custom component ID")
             custom_ids.add(entry["id"])
             validated_custom.append(entry)
+        project_id = data.get("id")
+        if project_id is None:
+            # Legacy documents have stable sheet UUIDs, even when titles match.
+            # Derivation keeps their identity stable before the first migrated save.
+            project_id = str(uuid5(NAMESPACE_URL, "electroschem:legacy-project:" +
+                                  ":".join(sorted(sheet.id for sheet in sheets)))) if sheets else new_id()
+        try:
+            if not isinstance(project_id, str): raise ValueError("Invalid project ID")
+            project_id = str(UUID(project_id))
+        except ValueError as error:
+            raise ValueError("Invalid project ID") from error
         result = cls(name=str(data.get("name", "New project")), sheets=sheets or [Sheet()],
                      custom_components=validated_custom, reference_counters=counters,
-                     metadata=dict(metadata))
+                     metadata=dict(metadata), id=project_id)
         result.ensure_references()
         result._resolve_pin_links(version)
         return result

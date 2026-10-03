@@ -287,10 +287,9 @@ class _Circuit:
 
     def t(self, en, pl): return pl if self.language == "pl" else en
 
-    def step(self, dt=0.0001):
+    def validate_time_step(self, dt):
         if not isfinite(dt) or not 1e-10 <= dt <= .01:
             raise SimulationError("Time step must be 0.1 ns … 10 ms")
-        if self.result.faults: raise SimulationError(self.t("Reset after a fault.", "Zresetuj po awarii."))
         for d in self.sources:
             if d.kind == "ac" and dt*d.parameters["sim_frequency"] > .02:
                 raise SimulationError(self.t("AC needs 50+ time steps per period; lower the time step.",
@@ -298,6 +297,10 @@ class _Circuit:
         for d in self.devices:
             if d.kind == "crystal" and dt*d.parameters["value"] > .02:
                 raise SimulationError(self.t("Crystal model needs at least 50 steps per period.", "Model kwarcu wymaga co najmniej 50 kroków na okres."))
+
+    def step(self, dt=0.0001):
+        self.validate_time_step(dt)
+        if self.result.faults: raise SimulationError(self.t("Reset after a fault.", "Zresetuj po awarii."))
         count = len(self.index)
         size = count+len(self.sources)
         new_time = self.time+dt
@@ -622,8 +625,20 @@ class Circuit:
     def active_devices(self):
         return [d for i,part in enumerate(self.parts) if i not in self.disabled for d in part.devices]
 
+    def maximum_time_step(self):
+        """Sampling-safe limit with headroom for the UI's decimal rounding."""
+        limit=.01
+        for device in self.active_devices():
+            if device.kind=="ac": limit=min(limit,.019/device.parameters["sim_frequency"])
+            elif device.kind=="crystal": limit=min(limit,.019/device.parameters["value"])
+        return limit
+
     def step(self, dt=.0001):
         if self.result.faults: raise SimulationError("Zresetuj lub wznów sprawne obwody" if self.language=="pl" else "Reset or resume healthy circuits")
+        # Sampling configuration errors must never become component explosions,
+        # and no island may advance before all active islands pass this check.
+        for i,part in enumerate(self.parts):
+            if i not in self.disabled: part.validate_time_step(dt)
         merged=Result(self.time+dt,warnings=dict(self.ignored_warnings))
         for i,(part,mapping) in enumerate(zip(self.parts,self.maps)):
             if i in self.disabled:

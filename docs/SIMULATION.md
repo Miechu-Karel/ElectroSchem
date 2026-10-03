@@ -1,4 +1,28 @@
-# Simulation - 1.1.0
+# Simulation - 1.1.1
+
+## Stable patch release
+
+Version 1.1.1 promotes 1.1.1alfa2 unchanged except for the release version.
+
+## Changes in 1.1.1alfa2
+
+- The switch is labeled Switch / Łącznik, retaining its legacy library ID and pins.
+- The sandbox lowers the integration step automatically for AC frequencies and
+  crystal oscillators. Frequency is not capped at 50 Hz; at least 50 samples per
+  cycle remain required. Very high frequencies can exceed the supported minimum
+  step or run slower than real time.
+- Sampling configuration errors pause simulation without marking components as
+  damaged or triggering an explosion. Physical overvoltage faults remain active.
+
+## Changes in 1.1.1alfa1
+
+- New projects receive a persistent UUID stored in ELS, independent of title.
+  Legacy documents derive a stable UUID from their sheet identifiers on load;
+  it is stored on the next save. Renaming or saving a copy retains identity;
+  creating a new project assigns a new UUID even when its title is identical.
+- New Python entry points are empty. Existing linked code and helper folders
+  remain untouched; unassigned code is not imported from unrelated legacy paths.
+- New filenames use `<component-ID>_<project-UUID-without-hyphens>_code.py`.
 
 ## Stable release
 
@@ -153,7 +177,8 @@ history below documents the implemented features and their limitations.
   [IEEE logic symbols](https://standards.ieee.org/ieee/91/6541/).
 - Code filenames are `<component-ID>_<project-ID>_code.<extension>`.
   Project ID is the first 16 hexadecimal characters of SHA-256 of the exact
-  UTF-8 project title. Renaming a project changes this identifier. Component
+  UTF-8 project title. Renaming a project changes this identifier (superseded by
+  persistent UUIDs in 1.1.1alfa1). Component
   UUID directories additionally isolate copies with the same visible reference.
   Previous linked files are copied, never deleted or overwritten.
 - Board properties offer Create / open code folder. It creates an entry file,

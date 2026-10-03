@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 from copy import deepcopy
 from pathlib import Path
-from hashlib import sha256
+from uuid import UUID
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -42,18 +42,18 @@ class Alpha10Tests(unittest.TestCase):
             self.assertIn("epilepsją",dialog.fault_note.text()); self.assertNotIn("pisk",dialog.fault_note.text())
             dialog.deleteLater()
 
-    def test_project_hash_copy_and_rename_preserve_old_sources(self):
+    def test_project_uuid_and_rename_preserve_old_sources(self):
         with tempfile.TemporaryDirectory() as directory,patch("app.core.board_code.appdata_directory",return_value=Path(directory)):
             project=Project(name="Migający LED na Raspberry")
             board=component("Raspberry Pi 5",100,100); board.reference="Raspberry.Pi.001"
-            self.assertEqual(project_code_id(project),sha256(project.name.encode("utf-8")).hexdigest()[:16])
+            self.assertEqual(project_code_id(project),UUID(project.id).hex)
             source=ensure_source(board,project)
             self.assertEqual(source.name,f"{board.reference}_{project_code_id(project)}_code.py")
             source.write_text("# Custom code\nfrom electroschem import Pin\np = Pin('GPIO12', Pin.OUT)\np.on()\n",encoding="utf-8")
             contents=source.read_bytes()
             project.name="A different project"
             new=ensure_source(board,project)
-            self.assertNotEqual(source,new); self.assertEqual(source.read_bytes(),contents); self.assertEqual(new.read_bytes(),contents)
+            self.assertEqual(source,new); self.assertEqual(source.read_bytes(),contents); self.assertEqual(new.read_bytes(),contents)
             other=deepcopy(board); other.id="other-instance"; other.properties={}
             self.assertNotEqual(ensure_source(other,project),new)
 
@@ -68,6 +68,7 @@ class Alpha10Tests(unittest.TestCase):
             note=folder/"README.md"; note.write_text("My notes",encoding="utf-8")
             ensure_code_folder(board,project); self.assertEqual(note.read_text(),"My notes")
             self.assertTrue((folder/"requirements.txt").is_file())
+            entry.write_text("from gpiozero import LED\nfrom time import sleep\nled=LED(12)\nwhile True:\n    led.on()\n    sleep(.5)\n    led.off()\n    sleep(.5)\n",encoding="utf-8")
             circuit=Circuit(Sheet(components=[board]))
             self.assertFalse(circuit.step(.001).faults)
             self.assertEqual(circuit.gpio_states[board.id]["GPIO12"],1)
@@ -131,7 +132,7 @@ class Alpha10Tests(unittest.TestCase):
         try:
             window.project.sheets=[example("dc")]; window._rebuild_tabs(); window.show_simulation(); sim=window.simulation_window
             before=deepcopy(window.project.to_dict())
-            self.assertIn("1.1.0",sim.windowTitle())
+            self.assertIn("1.1.1",sim.windowTitle())
             self.assertEqual(sim.windowIcon().cacheKey(),window.windowIcon().cacheKey())
             for theme in ("light","dark","light"):
                 window.settings.theme=theme; sim.refresh_theme(); window._current_view().apply_settings(window.settings)

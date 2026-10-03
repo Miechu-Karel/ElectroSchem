@@ -29,7 +29,7 @@ class Rc14Tests(unittest.TestCase):
         APP.processEvents()
 
     def test_no_ai_actions_with_legacy_key_in_both_languages(self):
-        self.assertEqual(APP_VERSION, "1.1.0")
+        self.assertEqual(APP_VERSION, "1.1.1")
         for language in ("en", "pl"):
             self.window.settings.language = language
             self.window._translate_ui()

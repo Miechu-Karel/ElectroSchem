@@ -3,7 +3,7 @@ from app.libraries.built_in import item_name
 
 # Para EN/PL pozwala utrzymać treść niezależną od identyfikatorów w ELS.
 SYMBOL_INFO = {
-    "spst": ("An ON/OFF switch opens or closes a single electrical path. Click it in the simulation sandbox to toggle the contact.", "Łącznik ON/OFF rozwiera lub zwiera jeden tor elektryczny. W sandboxie symulacji kliknij go, aby przełączyć styk."),
+    "spst": ("A switch opens or closes a single electrical path. Click it in the simulation sandbox to toggle the contact.", "Łącznik rozwiera lub zwiera jeden tor elektryczny. W sandboxie symulacji kliknij go, aby przełączyć styk."),
     "lamp": ("An incandescent lamp emits light when current heats its filament. The alpha simulator approximates it using its hot resistance, derived from rated power and voltage.", "Żarówka świeci, gdy prąd nagrzewa włókno. Symulator alfa przybliża ją rezystancją gorącego włókna wyznaczoną z mocy i napięcia znamionowego."),
     "ac_source": ("An AC voltage source periodically reverses polarity. The simulation uses a sine wave whose RMS voltage and frequency are adjustable.", "Źródło napięcia przemiennego okresowo zmienia biegunowość. Symulacja używa sinusoidy z ustawianym napięciem skutecznym RMS i częstotliwością."),
     "resistor": ("A resistor limits current and produces a voltage drop. Its resistance is measured in ohms.", "Rezystor ogranicza prąd i powoduje spadek napięcia. Jego rezystancję podaje się w omach."),

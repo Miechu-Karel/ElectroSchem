@@ -23,14 +23,14 @@ def example(name):
             transistor=c("Tranzystor NPN PN2222",660,300,"Q1")
             transistor.display_name="PN2222"
             base=c("Rezystor",360,300,"R2","10","kΩ")
-            switch=c("Łącznik ON/OFF",160,300,"SW1",sim_closed="true")
+            switch=c("Łącznik",160,300,"SW1",sim_closed="true")
             devices.extend([transistor,base,switch])
             connections.extend([(load,1,transistor,2),(transistor,0,ground,0),(source,0,switch,0),(switch,1,base,0),(base,1,transistor,1)])
         else: connections.append((load,1,ground,0))
     elif name == "led":
         load=c("Dioda LED 3mm",660,240,"LED1",color="red")
         resistor=c("Rezystor",440,140,"R1","330")
-        switch=c("Łącznik ON/OFF",440,360,"SW1",sim_closed="true")
+        switch=c("Łącznik",440,360,"SW1",sim_closed="true")
         devices=[source,resistor,load,switch]
         connections=[(source,0,resistor,0),(resistor,1,load,0),(load,1,switch,1),(switch,0,source,1)]
     elif name == "ac":

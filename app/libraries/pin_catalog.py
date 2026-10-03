@@ -304,6 +304,7 @@ xiao["name_en"] = "Seeed Studio XIAO ESP32-S3 Sense (OV3660 camera)"
 xiao["prefix"] = "mc_" + xiao["name_en"] + "___"
 
 # Elementy podstawowe alfa1: dwa wyprowadzenia, bez ukrytego zasilania.
-add("Łącznik ON/OFF", "ON/OFF Switch", "1|2", symbol="spst", show_pin_numbers=False)
+add("Łącznik ON/OFF", "Switch", "1|2", symbol="spst", show_pin_numbers=False)
+CATALOG["Łącznik ON/OFF"]["display_name"]="Łącznik"
 add("Żarówka", "Incandescent Lamp", "1|2", symbol="lamp", unit="W", show_pin_numbers=False)
 add("Źródło napięcia przemiennego", "AC Voltage Source", "+|−", symbol="ac_source", unit="V", show_pin_numbers=False)

@@ -4,6 +4,7 @@ Reset nie cofa edycji schematu. Odświeżenie pobiera nową kopię dokumentu.
 Krótkie porcje obliczeń ograniczają blokowanie pętli zdarzeń Qt.
 """
 from copy import deepcopy
+from math import floor
 from pathlib import Path
 from time import perf_counter, perf_counter_ns
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QVariantAnimation
@@ -229,7 +230,7 @@ class SimulationWindow(QWidget):
         self.step_button.clicked.connect(self.single_step)
         self.reset_button.clicked.connect(self.reset)
         self.reload_button.clicked.connect(self.reload)
-        self.dt.valueChanged.connect(self.pause)
+        self.dt.valueChanged.connect(self.time_step_changed)
         self.time_scale.valueChanged.connect(self.pause)
         self.fault_sound = None
         from app.simulation.arduino_compile import ArduinoCompiler
@@ -403,6 +404,7 @@ class SimulationWindow(QWidget):
         self.step_button.setEnabled(self.circuit is not None)
         self.camera_button.setEnabled(any("kamer" in item.definition.name.lower() or "camera" in item.definition.name_en.lower() for item in self.symbols.values()))
         self.buzzer_sound_button.setEnabled(self.circuit is not None and any(d.kind=="buzzer" for d in self.circuit.devices))
+        self.adjust_time_step()
 
     def open_camera(self):
         from app.ui.camera_preview import CameraPreview
@@ -541,6 +543,21 @@ class SimulationWindow(QWidget):
                 except (RuntimeError,TypeError): pass
             runner.deleteLater()
         self.runners.clear()
+
+    def time_step_changed(self, *_):
+        self.pause()
+        self.adjust_time_step()
+
+    def adjust_time_step(self):
+        circuit=getattr(self,"circuit",None)
+        if circuit is None: return
+        precision=10**self.dt.decimals()
+        limit=max(self.dt.minimum(),floor(circuit.maximum_time_step()*1000*precision)/precision)
+        if self.dt.value()>limit:
+            self.dt.setValue(limit)
+            self.log.appendPlainText(self.t(
+                "Time step reduced automatically to sample the signal frequency safely.",
+                "Krok czasowy zmniejszony automatycznie, aby poprawnie próbkować częstotliwość sygnału."))
 
     def calculate(self, single=False):
         started = perf_counter()

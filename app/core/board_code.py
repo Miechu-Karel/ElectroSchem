@@ -1,6 +1,7 @@
 """Create an editable, per-component GPIO source without overwriting code."""
 from pathlib import Path
 from hashlib import sha256
+from uuid import UUID
 import re
 from app.core.settings import appdata_directory
 from app.libraries.built_in import get_definition
@@ -8,8 +9,8 @@ from app.simulation.gpio_script import gpio_alias
 
 
 def project_code_id(project):
-    """Stable filename-safe identifier of the exact UTF-8 project title."""
-    return sha256(project.name.encode("utf-8")).hexdigest()[:16]
+    """Persistent project identity, independent of its editable title."""
+    return UUID(project.id).hex
 
 
 def ensure_source(component, project=None):
@@ -23,7 +24,9 @@ def ensure_source(component, project=None):
     if existing:
         path=Path(existing)
         if not path.is_file(): raise ValueError("Assigned source file is missing: "+str(path))
-        if path.name == filename: return path
+        # Existing links (including legacy names and multi-file folders) stay
+        # untouched. Never move an entry point away from its helper modules.
+        return path
     definition=get_definition(component.library_id)
     pins=[a for p in definition.pins if (a:=gpio_alias(p.name))]
     if not pins: raise ValueError("No programmable GPIO pins in this definition")
@@ -33,9 +36,7 @@ def ensure_source(component, project=None):
     folder=root/project_id/identity if project_id else root/identity
     folder.mkdir(parents=True, exist_ok=True)
     path=folder/filename
-    legacy=Path(existing) if existing else root/(identity+extension)
-    if existing and path.exists():
-        raise ValueError("Code destination already exists; existing files were kept: "+str(path))
+    legacy=root/(identity+extension) if project is None else None
     # Exclusive creation preserves code from an earlier session, even when
     # an older copy of the ELS file does not yet contain the source link.
     if not path.exists():
@@ -49,11 +50,9 @@ def ensure_source(component, project=None):
                     "void setup() { pinMode(LED_BUILTIN, OUTPUT); }\n"
                     "void loop() {\n  digitalWrite(LED_BUILTIN, HIGH); delay(500);\n"
                     "  digitalWrite(LED_BUILTIN, LOW); delay(500);\n}\n")
-        elif project is not None and "Raspberry Pi" in definition.name and "Pico" not in definition.name:
-            source=("# Raspberry Pi: gpiozero uses BCM GPIO numbering.\n"
-                    "from gpiozero import LED\nfrom time import sleep\n\n"
-                    "led = LED(12)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n")
-        if legacy.is_file():
+        elif project is not None:
+            source=""
+        if legacy is not None and legacy.is_file():
             # Copy old code before updating the link. Old ELS files may still
             # point at the previous path, so do not delete or overwrite it.
             with path.open("xb") as stream: stream.write(legacy.read_bytes())

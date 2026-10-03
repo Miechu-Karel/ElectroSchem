@@ -36,6 +36,7 @@ PAIRS = (
     ("The selection does not fit here. Move the cursor into the drawing area.","Zaznaczenie nie mieści się tutaj. Przenieś kursor w obszar rysunku."),
     ("Unknown component in clipboard","Nieznany element w schowku"),("Unknown component","Nieznany element"),
     ("Invalid ELS object","Niepoprawny obiekt ELS"),("Incomplete ELS object","Niekompletny obiekt ELS"),
+    ("Invalid project ID","Niepoprawne ID projektu"),
     ("Unsupported ELS version","Nieobsługiwana wersja ELS"),("Invalid sheet size","Niepoprawny format arkusza"),
     ("Invalid ElectroSchem package","Niepoprawny pakiet ELS"),("ELS document exceeds size limit","Zbyt duży dokument"),
     ("Unsupported ELS package version","Nieobsługiwana wersja pakietu ELS"),("Inconsistent ELS versions","Niezgodne wersje wewnątrz ELS"),

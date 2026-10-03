@@ -1,11 +1,24 @@
 # ElectroSchem
 
-**ElectroSchem 1.1.0** is an offline desktop editor for electronic schematics,
+**ElectroSchem 1.1.1** is an offline desktop editor for electronic schematics,
 built with Python and PySide6 (Qt). Draw circuits, connect components and
 prepare documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
+
+### 1.1.1alfa1 fixes
+
+Project IDs are now persistent UUIDs, not title hashes. Two newly created projects
+with the same title have different IDs; renaming or saving a copy retains the ID.
+Older ELS documents receive a stable migrated identity that is stored on the next
+save. New Python code files are empty, and existing source links are preserved.
+
+### 1.1.1alfa2 fixes
+
+The switch label is shortened to Switch / Łącznik without changing its library ID.
+The sandbox automatically lowers the time step for higher AC frequencies; sampling
+errors no longer trigger component explosions. Genuine overvoltage still causes faults.
 
 ## Features
 

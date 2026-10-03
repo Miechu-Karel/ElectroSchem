@@ -35,7 +35,7 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 ICON_DIR = Path(__file__).resolve().parents[2] / "Ikonki"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.

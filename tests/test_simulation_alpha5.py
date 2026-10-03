@@ -80,7 +80,7 @@ class Alpha5Tests(unittest.TestCase):
             board=component("Arduino Uno R3",100,100,sim_source=str(old),sim_mode="firmware")
             board.reference="mc_Arduino.Uno.R3___001"
             source=ensure_source(board)
-            self.assertEqual(source.name,board.reference+"_code.ino")
+            self.assertEqual(source,old)
             self.assertEqual(source.read_bytes(),old.read_bytes())
             self.assertEqual(board.properties["sim_mode"],"firmware")
 
