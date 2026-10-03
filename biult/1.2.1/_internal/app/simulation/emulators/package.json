@@ -1,0 +1,7 @@
+{
+  "name": "electroschem-emulators",
+  "version": "1.1.0-alpha.1",
+  "private": true,
+  "description": "Optional local firmware emulation engines for ElectroSchem",
+  "dependencies": { "avr8js": "0.21.1", "rp2040js": "1.4.0" }
+}
