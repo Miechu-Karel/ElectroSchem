@@ -1,2 +1,0 @@
-"""Elementy interfejsu PySide6."""
-
