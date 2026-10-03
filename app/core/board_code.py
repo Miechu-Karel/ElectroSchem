@@ -13,7 +13,7 @@ def project_code_id(project):
     return UUID(project.id).hex
 
 
-def ensure_source(component, project=None):
+def ensure_source(component, project=None, code_directory=None):
     existing=component.properties.get("sim_source", "")
     definition=get_definition(component.library_id)
     reference=re.sub(r'[\s<>:"/\\|?*\x00-\x1f]+', '.', component.reference).strip('. ')
@@ -31,7 +31,10 @@ def ensure_source(component, project=None):
     pins=[a for p in definition.pins if (a:=gpio_alias(p.name))]
     if not pins: raise ValueError("No programmable GPIO pins in this definition")
     pin=next((p for p in ("GPIO12","D13","GP0") if p in pins),pins[0])
-    root=appdata_directory()/"code"
+    # Explicit location is supplied by the UI's separate code-folder setting.
+    # The old default remains for legacy callers without settings.
+    root=Path(code_directory).expanduser() if code_directory is not None else appdata_directory()/"code"
+    if not root.is_absolute(): raise ValueError("Code folder must be an absolute path")
     identity=sha256(component.id.encode()).hexdigest()[:24]
     folder=root/project_id/identity if project_id else root/identity
     folder.mkdir(parents=True, exist_ok=True)
@@ -64,9 +67,9 @@ def ensure_source(component, project=None):
     return path
 
 
-def ensure_code_folder(component, project):
+def ensure_code_folder(component, project, code_directory=None):
     """Create an editable multi-file workspace; never replace existing files."""
-    source=ensure_source(component, project)
+    source=ensure_source(component, project, code_directory)
     folder=source.parent if component.properties.get("sim_code_folder")==str(source.parent) else source.parent/source.stem
     folder.mkdir(parents=True,exist_ok=True)
     entry=folder/source.name
@@ -83,3 +86,24 @@ def ensure_code_folder(component, project):
     component.properties["sim_source"]=str(entry)
     component.properties["sim_code_folder"]=str(folder)
     return folder
+
+
+def assign_source(component, source):
+    """Link an existing supported entry point without copying or executing it."""
+    if component.properties.get("sim_source", "").strip():
+        raise ValueError("Detach the assigned code before assigning another source file.")
+    from app.libraries.emulator_catalog import profile_for
+    definition=get_definition(component.library_id)
+    if definition is None or profile_for(definition) is None:
+        raise ValueError("Component is not programmable")
+    path=Path(source).expanduser().resolve()
+    if not path.is_file(): raise ValueError("Assigned source file is missing: "+str(path))
+    extension=path.suffix.lower()
+    if extension not in {".py",".ino"}: raise ValueError("Choose a Python .py or Arduino .ino source file")
+    if extension==".ino" and definition.name not in {"Arduino Uno R3","Arduino Nano"}:
+        raise ValueError("Arduino .ino compilation/emulation supports Uno R3 and classic Nano only.")
+    if str(path)!=component.properties.get("sim_source"):
+        component.properties.pop("sim_code_folder",None)
+    component.properties.update(sim_source=str(path),sim_mode="gpio" if extension==".py" else "arduino")
+    component.properties.pop("sim_firmware",None)
+    return path

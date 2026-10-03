@@ -24,6 +24,18 @@ def documents_directory() -> str:
     return QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation) or str(Path.home() / "Documents")
 
 
+def default_code_directory() -> str:
+    return str(Path(documents_directory()) / "ElectroSchem" / "Code")
+
+
+def code_dialog_directory(settings) -> str:
+    """Start at the chosen code directory, or its closest existing parent."""
+    chosen=Path(settings.default_code_directory or default_code_directory()).expanduser()
+    for candidate in (chosen,*chosen.parents):
+        if candidate.is_dir(): return str(candidate)
+    return documents_directory()
+
+
 def file_dialog_directory(settings) -> str:
     """Nie tworzymy ani nie zmieniamy katalogów przy samym otwieraniu dialogu."""
     chosen = Path(settings.default_directory).expanduser() if settings.default_directory else None
@@ -61,6 +73,7 @@ class AppSettings:
     window_mode: str = "maximized"
     editor_path: str = ""
     default_directory: str = field(default_factory=documents_directory)
+    default_code_directory: str = field(default_factory=default_code_directory)
     gemini_model: str = "auto"
     # repr=False zapobiega przypadkowemu wypisaniu sekretu podczas diagnostyki.
     api_key: str = field(default="", repr=False)
@@ -165,7 +178,7 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
             if legacy.allKeys():
                 store = legacy
     result = AppSettings()
-    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "default_directory", "default_author", "window_mode", "theme", "fault_effect"):
+    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "default_directory", "default_code_directory", "default_author", "window_mode", "theme", "fault_effect"):
         setattr(result, name, str(store.value(name, getattr(result, name))))
     for name in ("grid_visible", "setup_complete", "ai_chat_consent", "dramatic_faults"):
         try:
@@ -183,6 +196,9 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
         result.orientation = "landscape"
     if result.window_mode not in {"windowed","maximized","fullscreen"}: result.window_mode="maximized"
     if result.theme not in {"light","dark"}: result.theme="light"
+    code_path=Path(result.default_code_directory).expanduser()
+    if not code_path.is_absolute() or (code_path.exists() and not code_path.is_dir()):
+        result.default_code_directory=default_code_directory()
     if not store.contains("fault_effect") and store.contains("dramatic_faults"):
         result.fault_effect="mega" if result.dramatic_faults else "mini"
     elif result.fault_effect not in {"mini","medium","mega"}:
@@ -222,7 +238,7 @@ def save_settings(settings: AppSettings, store: QSettings | None = None) -> None
     encrypted = base64.b64encode(_dpapi(settings.api_key.encode("utf-8"))).decode("ascii") if settings.api_key else ""
     store = store if store is not None else settings_store()
     for name in ("language", "standard", "paper_size", "orientation", "grid_visible",
-                 "editor_path", "gemini_model", "setup_complete", "default_directory", "ai_chat_consent", "default_author", "dramatic_faults", "window_mode", "theme", "fault_effect"):
+                 "editor_path", "gemini_model", "setup_complete", "default_directory", "default_code_directory", "ai_chat_consent", "default_author", "dramatic_faults", "window_mode", "theme", "fault_effect"):
         store.setValue(name, getattr(settings, name))
     store.setValue("default_display_names", json.dumps(settings.default_display_names, ensure_ascii=False))
     store.setValue("default_component_values", json.dumps(settings.default_component_values, ensure_ascii=False))

@@ -12,6 +12,7 @@ class ManualDialog(QDialog):
         layout=QVBoxLayout(self); self.browser=QTextBrowser()
         shortcuts=[
             ("S","Select","Zaznaczanie"),("D","Draw wire","Rysuj połączenia"),
+            ("X","Delete tool","Narzędzie usuwania"),
             ("Del","Delete selection","Usuń zaznaczenie"),("R","Rotate component","Obróć element"),
             ("Ctrl+Z","Undo","Cofnij"),("Ctrl+Y / Ctrl+Shift+Z","Redo","Ponów"),
             ("Ctrl+S","Save","Zapisz"),("Ctrl+Shift+S","Save as","Zapisz jako"),
@@ -48,7 +49,7 @@ class ManualDialog(QDialog):
                 ("Click Input or switches to change state. Run after a fault resumes healthy circuits.","Kliknij Input lub przełącznik, aby zmienić stan. Uruchom po awarii wznawia sprawne obwody."),
                 ("Fault effects are gentle and silent by default. Intense flash and sound are opt-in; avoid them with photosensitivity or hearing sensitivity.","Efekty awarii są domyślnie łagodne i bezgłośne. Intensywny błysk i huk są opcjonalne. Nie włączaj ich przy nadwrażliwości na światło lub dźwięk.")]),
             ("Board code","Kod mikrokontrolerów",[
-                ("Properties > Edit code creates an Arduino Uno/Nano .ino sketch or Python board code. Reload from editor compiles .ino locally and imports code changes.","Właściwości > Edytuj kod tworzy szkic .ino Arduino Uno/Nano lub kod Pythona płytki. Pobierz z edytora kompiluje .ino lokalnie i wczytuje zmiany kodu."),
+                ("Properties > Create and Assign Code creates an Arduino Uno/Nano .ino sketch or Python board code in the default code folder selected in Settings. Edit Code opens the assigned file. Assign Existing Code links a file without copying it; Detach Code removes the link, not the file. Reload from editor compiles .ino locally and imports code changes.","Właściwości > Utwórz i Przypisz Kod tworzy szkic .ino Arduino Uno/Nano lub kod Pythona płytki w domyślnym folderze kodów wybranym w ustawieniach. Edytuj Kod otwiera przypisany plik. Przypisz Istniejący Kod wskazuje plik bez kopiowania; Odłącz Kod usuwa powiązanie, nie plik. Pobierz z edytora kompiluje .ino lokalnie i wczytuje zmiany kodu."),
                 ("Python supports GPIO, RPLCD and smbus LCD writes, functions and local helper modules, not an entire OS or every Python library. Firmware also supports HEX for Uno/Nano and UF2 for Pico.","Python obsługuje GPIO, zapis do LCD przez RPLCD i smbus, funkcje i lokalne moduły pomocnicze, nie cały system ani każdą bibliotekę Pythona. Firmware przyjmuje także HEX dla Uno/Nano i UF2 dla Pico."),
                 ("Device camera preview starts only after session consent. Stop revokes consent and releases the camera; no microphone, recording or transfer is enabled.","Podgląd kamery urządzenia uruchamia się tylko po zgodzie w sesji. Zatrzymaj cofa zgodę i zwalnia kamerę; mikrofon, nagrywanie i wysyłanie obrazu nie są włączane."),
                 ("Restart loads the assigned program from the beginning. Start/Pause controls execution. Full limitations: docs/SIMULATION.md.","Restart wczytuje przypisany program od początku. Start i Pauza sterują wykonaniem. Pełne ograniczenia: docs/SIMULATION.md.")])]

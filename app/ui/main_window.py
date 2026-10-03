@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from app.canvas.schematic_view import SchematicView
 from app.core.models import Project, Sheet
 from app.core.project_file import load_project, save_project
-from app.core.settings import AppSettings, default_editor, load_settings, save_settings, file_dialog_directory
+from app.core.settings import AppSettings, default_editor, load_settings, save_settings, file_dialog_directory, code_dialog_directory, default_code_directory
 from app.libraries.built_in import BUILT_IN_ITEMS, AVAILABLE_ITEMS, get_definition, item_name
 from app.libraries.menu_groups import subgroup, library_sort_key, secondary_locations
 from app.core.features import AI_AVAILABLE
@@ -35,7 +35,7 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 ICON_DIR = Path(__file__).resolve().parents[2] / "Ikonki"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
@@ -550,7 +550,7 @@ class MainWindow(QMainWindow):
         labels = {
             "select": ("Select / move; double-click for properties.", "Zaznacz / przesuń; dwuklik otwiera właściwości."),
             "wire": ("Click pins to connect. Right-click cancels drawing.", "Klikaj piny, aby połączyć. PPM anuluje rysowanie."),
-            "delete": ("Click an item to remove it. Delete removes the selection.", "Kliknij obiekt do usunięcia. Del usuwa zaznaczenie."),
+            "delete": ("Click an item to remove it. X activates this tool; Delete removes the selection.", "Kliknij obiekt do usunięcia. X włącza to narzędzie; Del usuwa zaznaczenie."),
             "comment": ("Click the sheet to add an Arial comment.", "Kliknij arkusz, aby dodać komentarz czcionką Arial."),
         }
         self.statusBar().showMessage(self.t(*labels[tool]))
@@ -891,7 +891,7 @@ class MainWindow(QMainWindow):
     def edit_component_code(self, component):
         from app.core.board_code import ensure_source
         try:
-            source = ensure_source(component, self.project)
+            source = ensure_source(component, self.project, self.settings.default_code_directory or default_code_directory())
             self.record_history()
             editor = self.settings.editor_path or default_editor()
             if not editor or not Path(editor).is_file():
@@ -905,7 +905,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
         try:
-            folder=ensure_code_folder(component,self.project)
+            folder=ensure_code_folder(component,self.project,self.settings.default_code_directory or default_code_directory())
             self.record_history()
             editor=self.settings.editor_path or default_editor()
             if editor and Path(editor).is_file() and Path(editor).stem.lower() in {"code","codium","cursor"}:
@@ -914,6 +914,29 @@ class MainWindow(QMainWindow):
                 raise OSError(self.t("Could not open the code folder.","Nie można otworzyć folderu kodu."))
         except (OSError,ValueError) as error:
             self._error(str(error))
+
+    def assign_component_code(self,component):
+        if component.properties.get("sim_source", "").strip(): return
+        from app.core.board_code import assign_source
+        definition=get_definition(component.library_id)
+        filters="Python (*.py)"
+        if definition and definition.name in {"Arduino Uno R3","Arduino Nano"}: filters+=";;Arduino (*.ino)"
+        filters+=";;"+self.t("All files (*)","Wszystkie pliki (*)")
+        filename,_=QFileDialog.getOpenFileName(self,self.t("Assign Existing Code","Przypisz Istniejący Kod"),
+                                               code_dialog_directory(self.settings),filters)
+        if not filename: return
+        try:
+            assign_source(component,filename)
+            self.record_history()
+        except (OSError,ValueError) as error: self._error(str(error))
+
+    def detach_component_code(self,component):
+        # Remove references only. Source files and workspace contents belong
+        # to the user and must never be deleted by this operation.
+        if not component.properties.get("sim_source", "").strip(): return
+        for key in ("sim_source", "sim_code_folder", "sim_firmware"):
+            component.properties.pop(key,None)
+        self.record_history()
 
     def search_components(self):
         from PySide6.QtWidgets import QListWidget

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
-from app.core.settings import AppSettings, default_editor, detected_editors, documents_directory, file_dialog_directory
+from app.core.settings import AppSettings, default_editor, detected_editors, documents_directory, file_dialog_directory, default_code_directory
 from app.ui.i18n import install_ui_language
 from app.core.features import AI_AVAILABLE
 
@@ -75,6 +75,15 @@ class SettingsDialog(QDialog):
         directory_layout.setContentsMargins(0, 0, 0, 0)
         directory_layout.addWidget(self.directory, 1)
         directory_layout.addWidget(self.directory_button)
+        self.code_directory=QLineEdit(settings.default_code_directory or default_code_directory())
+        self.code_directory_button=QPushButton("…")
+        self.code_directory_button.setFixedWidth(35)
+        self.code_directory_button.clicked.connect(self._browse_code_directory)
+        code_directory_row=QWidget()
+        code_directory_layout=QHBoxLayout(code_directory_row)
+        code_directory_layout.setContentsMargins(0,0,0,0)
+        code_directory_layout.addWidget(self.code_directory,1)
+        code_directory_layout.addWidget(self.code_directory_button)
         self._rows = []
         self.author = QLineEdit(settings.default_author)
         self.author.setMaxLength(250)
@@ -89,7 +98,7 @@ class SettingsDialog(QDialog):
         for key in ("windowed","maximized","fullscreen"): self.window_mode.addItem(key,key)
         self.window_mode.setCurrentIndex(max(0,self.window_mode.findData(settings.window_mode)))
         for field in (self.language, self.standard, self.paper, self.orientation,
-                      self.grid, editor_row, self.key, self.model, directory_row, self.ai_consent, self.author, self.fault_effect, self.window_mode,self.theme):
+                      self.grid, editor_row, self.key, self.model, directory_row, code_directory_row, self.ai_consent, self.author, self.fault_effect, self.window_mode,self.theme):
             label = QLabel()
             self._rows.append(label)
             self.form.addRow(label, field)
@@ -130,7 +139,7 @@ class SettingsDialog(QDialog):
                   ("Default sheet", "Domyślny arkusz"), ("Default orientation", "Domyślna Orientacja"),
                   ("Grid", "Siatka"), ("Code editor", "Edytor kodu"),
                   ("Gemini API key (optional)", "Klucz API Gemini (opcjonalny)"),
-                  ("Gemini model", "Model Gemini"), ("Default folder", "Domyślny folder"), ("AI privacy", "Prywatność AI"),
+                  ("Gemini model", "Model Gemini"), ("Default folder", "Domyślny folder"), ("Default code folder", "Domyślny folder kodów"), ("AI privacy", "Prywatność AI"),
                   ("Username", "Nazwa użytkownika"), ("Fault effects", "Efekty awarii"), ("Window mode", "Tryb okna"),("Theme","Motyw")]
         for label, texts in zip(self._rows, labels):
             label.setText(self._t(*texts))
@@ -172,6 +181,13 @@ class SettingsDialog(QDialog):
         if not directory.is_absolute() or not directory.is_dir():
             QMessageBox.warning(self, self._t("Folder", "Folder"), self._t("Select an existing folder.", "Wybierz istniejący folder."))
             return
+        code_directory=Path(self.code_directory.text().strip() or default_code_directory()).expanduser()
+        existing=next((p for p in (code_directory,*code_directory.parents) if p.exists()),None)
+        if not code_directory.is_absolute() or (existing is not None and not existing.is_dir()):
+            QMessageBox.warning(self,self._t("Code folder","Folder kodów"),self._t(
+                "Choose an absolute code-folder path. It will be created when code is generated.",
+                "Wybierz bezwzględną ścieżkę folderu kodów. Folder powstanie przy tworzeniu kodu."))
+            return
         key = self.key.text().strip()
         if AI_AVAILABLE and key and (not key.isascii() or any(character.isspace() for character in key)):
             QMessageBox.warning(self, "Gemini", self._t("The API key must contain ASCII characters without whitespace.", "Klucz API musi zawierać znaki ASCII bez białych znaków."))
@@ -185,12 +201,19 @@ class SettingsDialog(QDialog):
             default_display_names=dict(self._settings.default_display_names),
             default_component_values=dict(self._settings.default_component_values),
             default_directory=str(directory),
+            default_code_directory=str(code_directory),
             default_author=self.author.text().strip(), dramatic_faults=self.fault_effect.currentData()=="mega",
             fault_effect=self.fault_effect.currentData(),theme=self.theme.currentData(),
             window_mode=self.window_mode.currentData(),
             ai_chat_consent=self.ai_consent.isChecked() if AI_AVAILABLE else self._settings.ai_chat_consent,
         )
         self.accept()
+
+    def _browse_code_directory(self):
+        start=Path(self.code_directory.text().strip() or default_code_directory()).expanduser()
+        start=next((p for p in (start,*start.parents) if p.is_dir()),Path(documents_directory()))
+        path=QFileDialog.getExistingDirectory(self,self._t("Default code folder","Domyślny folder kodów"),str(start))
+        if path: self.code_directory.setText(path)
 
     def result_settings(self) -> AppSettings:
         """Kopia uniemożliwia zmianę aktywnych ustawień przez anulowany formularz."""

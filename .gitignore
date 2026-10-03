@@ -8,3 +8,6 @@ output/
 .env
 node_modules/
 .tools/
+# Portable Windows releases belong to the biults branch, never main.
+/biult/
+/biults/

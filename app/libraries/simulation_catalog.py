@@ -110,8 +110,8 @@ def behavior_for(definition):
     profile = profile_for(definition)
     if profile:
         return Behavior("mcu" if profile.ready else "mcu_gpio",
-            note_en=profile.reason_en+" GPIO script mode supports digital pins only; Edit code creates a program. It does not emulate the OS or CPU.",
-            note_pl=profile.reason_pl+" Tryb skryptu GPIO obsługuje piny cyfrowe; Edytuj kod tworzy program. Nie emuluje systemu ani procesora.")
+            note_en=profile.reason_en+" GPIO script mode supports digital pins only. Create a program or assign an existing source file using the buttons above. It does not emulate the OS or CPU.",
+            note_pl=profile.reason_pl+" Tryb skryptu GPIO obsługuje piny cyfrowe. Utwórz program lub przypisz istniejący plik kodu przyciskami powyżej. Nie emuluje systemu ani procesora.")
     symbol, name = definition.symbol, definition.name
     if symbol == "power":
         voltage = "3.3 V" if "+3.3V" in name else "12 V" if "+12V" in name else "5 V"

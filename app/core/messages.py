@@ -1,5 +1,6 @@
 """Single-language presentation of legacy and new diagnostic messages."""
 PAIRS = (
+    ("Detach the assigned code before assigning another source file.","Odłącz przypisany kod przed przypisaniem innego pliku."),
     ("Arduino .ino compilation/emulation supports Uno R3 and classic Nano only.","Kompilacja i emulacja Arduino .ino obsługuje tylko Uno R3 i klasyczne Nano."),
     ("Arduino CLI is missing. Install arduino-cli and the arduino:avr core.","Brak Arduino CLI. Zainstaluj arduino-cli i rdzeń arduino:avr."),
     ("Assign an existing Arduino .ino sketch first.","Najpierw przypisz istniejący szkic Arduino .ino."),
@@ -37,6 +38,9 @@ PAIRS = (
     ("Unknown component in clipboard","Nieznany element w schowku"),("Unknown component","Nieznany element"),
     ("Invalid ELS object","Niepoprawny obiekt ELS"),("Incomplete ELS object","Niekompletny obiekt ELS"),
     ("Invalid project ID","Niepoprawne ID projektu"),
+    ("Code folder must be an absolute path","Folder kodów musi mieć bezwzględną ścieżkę"),
+    ("Component is not programmable","Element nie obsługuje programowania"),
+    ("Choose a Python .py or Arduino .ino source file","Wybierz plik źródłowy Python .py lub Arduino .ino"),
     ("Unsupported ELS version","Nieobsługiwana wersja ELS"),("Invalid sheet size","Niepoprawny format arkusza"),
     ("Invalid ElectroSchem package","Niepoprawny pakiet ELS"),("ELS document exceeds size limit","Zbyt duży dokument"),
     ("Unsupported ELS package version","Nieobsługiwana wersja pakietu ELS"),("Inconsistent ELS versions","Niezgodne wersje wewnątrz ELS"),

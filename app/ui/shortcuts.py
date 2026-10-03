@@ -88,7 +88,10 @@ class EditorShortcuts(QObject):
             if key == Qt.Key.Key_D:
                 self.window.wire_action.trigger()
                 return True
+            if key == Qt.Key.Key_X:
+                self.window.delete_action.trigger()
+                return True
             if key == Qt.Key.Key_Delete:
-                self.window._current_view().delete_selected()
+                if view is not None: view.delete_selected()
                 return True
         return False

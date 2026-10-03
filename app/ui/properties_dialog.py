@@ -1,6 +1,7 @@
 """Właściwości na żądanie: nie zajmują stale miejsca obok arkusza."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QVBoxLayout, QScrollArea, QWidget, QSizePolicy
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QVBoxLayout, QScrollArea, QWidget, QSizePolicy, QFrame
+from PySide6.QtGui import QTextOption
 from app.core.units import parse_value
 from app.core.led_colors import LED_COLORS, color_key
 from app.libraries.built_in import item_name
@@ -21,6 +22,8 @@ class ComponentPropertiesDialog(QDialog):
         # Dodatkowe parametry nie mogą wypchnąć przycisku Zapisz poza ekran.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.form_scroll = scroll
         body = QWidget()
         body_layout = QVBoxLayout(body)
         fields = QWidget()
@@ -113,10 +116,25 @@ class ComponentPropertiesDialog(QDialog):
             from PySide6.QtWidgets import QPushButton
             from PySide6.QtGui import QIcon
             from pathlib import Path
-            self.edit_code_button = QPushButton(self.t("Edit code…", "Edytuj kod…"))
+            self.edit_code_button = QPushButton()
             self.edit_code_button.setIcon(QIcon(str(Path(__file__).resolve().parents[2]/"Ikonki"/"Edytuj Kod.png")))
             self.edit_code_button.clicked.connect(lambda: self._edit_board_code(parent))
             form.addRow(self.edit_code_button)
+            self.assign_code_button=QPushButton(self.t("Assign Existing Code","Przypisz Istniejący Kod"))
+            self.assign_code_button.setEnabled(hasattr(parent,"assign_component_code"))
+            self.assign_code_button.clicked.connect(lambda: self._assign_board_code(parent))
+            form.addRow(self.assign_code_button)
+            # A Windows path is one long word to QLabel. Use an anywhere-wrapped,
+            # selectable text view so it cannot force the whole form offscreen.
+            self.code_path_label=QPlainTextEdit()
+            self.code_path_label.setReadOnly(True)
+            self.code_path_label.setFrameShape(QFrame.Shape.NoFrame)
+            self.code_path_label.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+            self.code_path_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.code_path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            self.code_path_label.setFixedHeight(self.fontMetrics().lineSpacing()*3+8)
+            form.addRow(self.code_path_label)
+            self._refresh_code_label()
             if hasattr(parent,"edit_component_code_folder"):
                 self.code_folder_button=QPushButton(self.t("Create / open code folder…","Utwórz / otwórz folder kodu…"))
                 self.code_folder_button.clicked.connect(lambda: self._edit_board_code(parent,folder=True))
@@ -189,6 +207,33 @@ class ComponentPropertiesDialog(QDialog):
     def _edit_board_code(self,parent,folder=False):
         if folder: parent.edit_component_code_folder(self.component)
         else: parent.edit_component_code(self.component)
+        self._sync_code_fields()
+
+    def _assign_board_code(self,parent):
+        if self.component.properties.get("sim_source", "").strip():
+            parent.detach_component_code(self.component)
+        else:
+            parent.assign_component_code(self.component)
+        self._sync_code_fields()
+
+    def _refresh_code_label(self):
+        source=self.component.properties.get("sim_source","").strip()
+        self.edit_code_button.setText(self.t("Edit Code","Edytuj Kod") if source else
+                                      self.t("Create and Assign Code","Utwórz i Przypisz Kod"))
+        self.edit_code_button.setToolTip(source)
+        from pathlib import Path
+        from PySide6.QtGui import QIcon
+        self.assign_code_button.setText(self.t("Detach Code","Odłącz Kod") if source else
+                                       self.t("Assign Existing Code","Przypisz Istniejący Kod"))
+        self.assign_code_button.setIcon(QIcon(str(Path(__file__).resolve().parents[2]/"Ikonki"/"Usuń v2.png")) if source else QIcon())
+        parent=self.parent()
+        self.assign_code_button.setEnabled(hasattr(parent,"detach_component_code" if source else "assign_component_code"))
+        self.code_path_label.setPlainText(self.t("Assigned code: ","Przypisany kod: ")+source if source else "")
+        self.code_path_label.setToolTip(source)
+        self.code_path_label.setVisible(bool(source))
+
+    def _sync_code_fields(self):
+        self._refresh_code_label()
         # Saving this already-open dialog must not restore the old source link.
         for key in ("sim_source","sim_mode"):
             field=self.simulation_fields.get(key)

@@ -1,11 +1,42 @@
 # ElectroSchem
 
-**ElectroSchem 1.1.1** is an offline desktop editor for electronic schematics,
+**ElectroSchem 1.2.0** is an offline desktop editor for electronic schematics,
 built with Python and PySide6 (Qt). Draw circuits, connect components and
 prepare documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
+
+### Stable release 1.2.0
+
+Version 1.2.0 promotes 1.2.0rc1 without functional changes. Portable Windows
+releases are available on the `biults` branch under `biult/1.1.1` and
+`biult/1.2.0`. Keep each EXE with its matching `_internal` directory. The `main`
+branch contains source code, not portable build folders.
+
+### 1.2.0rc1 changes
+
+**X** activates the delete tool without removing the current selection.
+**Delete** removes the selection; **Ctrl+X** still cuts. Text fields retain
+normal typing behavior.
+
+### 1.2.0alfa2 changes
+
+Assigned code cannot be replaced directly: the assignment button becomes
+**Detach Code**, which removes references without deleting any files. Detach
+before assigning another source. Long code paths wrap inside the properties
+dialog. The X shortcut is corrected in 1.2.0rc1 as described above.
+
+### 1.2.0alfa1 changes
+
+Settings now include a separate default code folder, initially
+`Documents/ElectroSchem/Code`. New board code is created there, isolated by project
+UUID and board identity. Existing files stay where they are; changing the setting
+does not move or overwrite them. Component properties offer **Create and Assign
+Code** when no file is linked, **Edit Code** otherwise, and **Assign Existing Code**
+directly below it. Assigning a file links its original path without copying or
+executing it. Python `.py` works with the supported board APIs; `.ino` compilation
+is limited to Arduino Uno R3 and classic Nano.
 
 ### 1.1.1alfa1 fixes
 

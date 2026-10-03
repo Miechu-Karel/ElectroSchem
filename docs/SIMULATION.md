@@ -1,4 +1,31 @@
-# Simulation - 1.1.1
+# Simulation - 1.2.0
+
+## Stable release 1.2.0
+
+Version 1.2.0 promotes 1.2.0rc1 without functional changes.
+
+## Changes in 1.2.0rc1
+
+- X activates the delete tool without deleting the selection. Delete still
+  removes the selection, Ctrl+X cuts, and text fields handle typing normally.
+
+## Changes in 1.2.0alfa2
+
+- Assigned boards show Detach Code with the delete icon instead of Assign Existing
+  Code. Detaching removes source/workspace/compiled-firmware references only;
+  files remain untouched. Detach first to assign a different entry point.
+- Long paths wrap within the properties form instead of widening it offscreen.
+- The X shortcut is corrected in 1.2.0rc1 as described above.
+
+## Changes in 1.2.0alfa1
+
+- A separate default code-folder preference controls new board source/workspace
+  creation; default: Documents/ElectroSchem/Code. Settings remain in AppData.
+- Existing source links stay intact, even after changing the default folder.
+  No automatic migration, moving or deletion of old code takes place.
+- Board properties show Create and Assign Code when unassigned, otherwise Edit
+  Code. Assign Existing Code directly below links a .py or supported Arduino .ino
+  entry point without copying it or running it. The assigned path is visible.
 
 ## Stable patch release
 
