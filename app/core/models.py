@@ -11,7 +11,9 @@ import json
 from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from datetime import datetime
 
-FORMAT_VERSION = 3
+# RC24 writes a new ELS package version so releases that only understand v1-v3
+# reject these files instead of silently opening a potentially incompatible save.
+FORMAT_VERSION = 4
 PAPER_SIZES_MM = {"A0": (841, 1189), "A1": (594, 841), "A2": (420, 594),
                   "A3": (297, 420), "A4": (210, 297), "A5": (148, 210)}
 
@@ -52,6 +54,7 @@ class Wire:
     # pinów w nowszym katalogu. Indeks pozostaje wygodnym cache dla widoku.
     start_pin_number: str | None = None
     end_pin_number: str | None = None
+    group_id: str | None = None
 
 @dataclass
 class Annotation:
@@ -60,6 +63,7 @@ class Annotation:
     y: float
     id: str = field(default_factory=new_id)
     font_size: int = 12
+    group_id: str | None = None
 
 @dataclass
 class Sheet:
@@ -180,6 +184,8 @@ class Project:
                 result = []
                 for obj in objects:
                     item = _read_dataclass(kind, obj)
+                    if kind in {Wire,Annotation} and item.group_id is not None and not isinstance(item.group_id,str):
+                        raise ValueError("Invalid asset group")
                     if not isinstance(item.id, str) or not item.id or item.id in ids:
                         raise ValueError("Duplicate/invalid object ID")
                     ids.add(item.id)

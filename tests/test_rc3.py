@@ -95,7 +95,8 @@ class Rc3Tests(unittest.TestCase):
         item = ComponentItem(ComponentInstance(definition.id, 0, 0))
         self.assertEqual(item.scale(), 1)
         self.assertEqual(item._hit_rect.width(), definition.width)
-        self.assertEqual(item._hit_rect.height(), definition.height)
+        self.assertEqual(item._symbol_rect.height(), definition.height)
+        self.assertEqual(item._hit_rect.height(), definition.height+40)  # Dedicated bottom connector strip.
 
     def test_right_rectangle_left_single_and_middle_pan(self):
         first = self.add("Rezystor")
@@ -169,7 +170,8 @@ class Rc3Tests(unittest.TestCase):
             self.assertEqual(dialog._has_primary_value, expected_primary)
             self.assertEqual(dialog._extra_key, extra)
             if not expected_primary:
-                self.assertFalse(any(label.text() in ("Value:", "Unit:") for label in dialog.findChildren(QLabel)))
+                self.assertFalse(any(label.text() == "Value:" for label in dialog.findChildren(QLabel)))
+                self.assertEqual(sum(label.text() == "Unit:" for label in dialog.findChildren(QLabel)), len(dialog.simulation_units))
             if extra:
                 if extra == "voltage":
                     dialog.extra_value.setText("25")

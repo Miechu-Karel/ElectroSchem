@@ -1,4 +1,52 @@
-# Simulation - 1.2.1
+# Simulation - 1.3.0alfa4
+
+Tact presses animate and release with the mouse. The joystick has a larger knob,
+RMB held switch and an alternative SW button. SW defaults to the educational
+active-HIGH mode: LOW released, HIGH pressed. The optional physical-contact mode
+is active LOW, with a disableable 10 kΩ pull-up. Supply it from
+a compatible logic rail (3.3 V for Raspberry Pi). The assistant's isolated, bounded electrical
+probe reports faults and warnings without changing the live sandbox.
+
+## Alpha 1.3.0 additions
+
+- Tact switches and keypad buttons stay closed until the mouse is released;
+  pressing immediately evaluates a step without pausing an already running
+  sandbox. Mouse movement over PIR generates a retriggerable 500 ms stimulus.
+- Joystick: drag the filled knob with LMB; RMB produces a momentary push-switch
+  contact while held. LMB release recentres both 10 kΩ potentiometers.
+- Enable Raspberry Pi console in properties, then click the board to show/hide
+  bounded Python stdout. This is not a host terminal or a Raspberry Pi OS shell.
+- Solar voltage is an educational linear illumination fraction of full-light
+  voltage. The slider changes only the sandbox copy. No photovoltaic IV curve,
+  temperature model or realistic short-circuit current is claimed.
+- AC/DC is a four-diode bridge without a filter. DC/AC is a non-isolated sine
+  inverter with amplitude limited by its input voltage, not a transformer or
+  230 V mains supply. Buck, boost and buck-boost are averaged energy-balance
+  models; switching ripple is not modelled.
+- Parallel 8/10/12-bit DACs, dual open-collector LM393 (pull-ups required), quad LM324
+  and CD4066 switches are simplified electrical models. USB/Lightning are
+  passive contacts: VBUS/POWER only carries power supplied by another source.
+  Legacy **Supply power** flags no longer invent a voltage source. USB-C joins
+  its repeated power/ground contacts. No PD/data/authentication emulation.
+
+Live 100% pacing targets one simulation second per monotonic wall-clock second.
+When a fine step cannot keep up, the runtime increases it within AC/crystal
+sampling limits and a conservative fraction of the minimum estimated RC/LR
+time constant. Manual single-step remains explicit. Actual measured speed is
+shown beside the clock; unusually heavy circuits or high-frequency signals can
+still exceed host performance. The clock never skips uncomputed circuit states.
+The adaptive RC/LR ceiling is one quarter of the smallest estimated time
+constant, subject to stricter signal-frequency limits. Rendering is limited to
+20 updates per second; electrical integration and held inputs are not tied to
+that refresh rate. Manual step mode retains the explicitly selected step.
+- Grove LSM6DS3 105020012 has a supply envelope only; motion interaction and
+  register access are intentionally pending joint design with the user.
+- Passive RFID cards have no wired pins. Set the eight-hex-digit RFID ID and
+  drag a card near a connected RC522 to present its preview UID. This updates only
+  its stimulus preview, not an RF/SPI protocol or firmware-readable UID.
+- Removed menu entries retain their definitions for old ELS documents.
+
+These models are educational approximations, not electrical safety assessments.
 
 ## Stable release 1.2.1
 

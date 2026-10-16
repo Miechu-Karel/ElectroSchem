@@ -6,7 +6,9 @@ def nominal_value(definition):
     # A specifically named 9 V battery should be usable without typing 9 V.
     # Existing explicit values are never replaced (e.g. a discharged battery).
     if definition and definition.name=="Zasilacz Raspberry Pi USB-C 27 W": return "5.1","V"
-    return ("9", "V") if definition and definition.name == "Bateria 9V" else ("", getattr(definition,"default_unit", ""))
+    if definition and definition.name == "Kostka zasilająca USB": return "5","V"
+    if definition and definition.name=='Zasilacz laboratoryjny': return '5','V'
+    return ("9", "V") if definition and definition.name in {"Bateria", "Bateria 9V"} else ("", getattr(definition,"default_unit", ""))
 
 
 def value_defaults(component):

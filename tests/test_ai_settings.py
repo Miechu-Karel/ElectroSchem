@@ -193,6 +193,15 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(settings.language, "en")
         dialog.deleteLater()
 
+    def test_openai_model_is_visible_for_provider_and_persists_on_save(self):
+        settings = AppSettings(ai_provider="openai", openai_model="gpt-test-model")
+        dialog = SettingsDialog(settings)
+        self.assertTrue(dialog.form.isRowVisible(dialog.openai_model))
+        dialog.openai_model.setText("custom-model-2026")
+        dialog._accept()
+        self.assertEqual(dialog.result_settings().openai_model, "custom-model-2026")
+        dialog.deleteLater()
+
     def test_ai_disabled_without_key(self):
         dialog = AiDialog(AppSettings(), {}, lambda value: None)
         self.assertFalse(dialog.generate_button.isEnabled())

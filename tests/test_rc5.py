@@ -44,7 +44,7 @@ class Rc5CatalogTests(unittest.TestCase):
             path = Path(folder) / "legacy.els"
             save_project(path, project)
             self.assertEqual(load_project(path).to_dict(), project.to_dict())
-        self.assertEqual(len(AVAILABLE_ITEMS), 145)
+        self.assertEqual(len(AVAILABLE_ITEMS), 210)
 
     def test_mcp3008_pdip_pinout(self):
         item = BY_NAME["Przetwornik ADC MCP3008"]
@@ -86,9 +86,10 @@ class Rc5WindowTests(unittest.TestCase):
 
     def test_every_available_item_has_one_primary_menu_action(self):
         ids = []
-        for index in range(5):
+        for index in range(len(self.window.library_actions)):
             menu = QMenu(self.window)
-            self.window._populate_library_menu(menu, index, QPoint(200, 200))
+            with patch("app.core.assets.load_assets",return_value=[]):
+                self.window._populate_library_menu(menu, index, QPoint(200, 200))
             actions = list(placement_actions(menu))
             ids.extend(action.data() for action in actions if not action.property("secondaryEntry"))
             if index == 1:

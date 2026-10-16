@@ -4,6 +4,7 @@ Sekwencję zaczyna Ctrl+A albo Shift+A; druga litera może być naciśnięta
 po puszczeniu modyfikatora lub przy nadal wciśniętym Ctrl/Shift.
 """
 from PySide6.QtCore import QObject, QEvent, Qt, QTimer
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox
 
 
@@ -66,19 +67,40 @@ class EditorShortcuts(QObject):
                     self.window.open_add_menu()
                     return True
                 categories = {Qt.Key.Key_E: 0, Qt.Key.Key_S: 1, Qt.Key.Key_I: 2,
-                              Qt.Key.Key_C: 3, Qt.Key.Key_M: 4}
+                              Qt.Key.Key_C: 3, Qt.Key.Key_M: 4, Qt.Key.Key_F: 5, Qt.Key.Key_P: 6, Qt.Key.Key_K:7}
+                categories[Qt.Key.Key_T] = 8
                 if key in categories:
                     self.window.open_library(categories[key])
                     return True
             elif key == Qt.Key.Key_S:
                 self.window.add_sheet()
                 return True
+            elif group == "tools" and key == Qt.Key.Key_I:
+                self.window.ai_action.trigger()
+                return True
+        if key==Qt.Key.Key_F and mods==Qt.KeyboardModifier.ShiftModifier:
+            self.window.open_library(5)
+            return True
+        if key==Qt.Key.Key_F and not mods:
+            self.window.toggle_favorite()
+            return True
         if key == Qt.Key.Key_A and mods in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.ShiftModifier):
             self.pending = "component" if mods == Qt.KeyboardModifier.ControlModifier else "tools"
             self.timer.start(2000)
             self.window.statusBar().showMessage(self.window.t("Choose the next shortcut letter…", "Naciśnij drugą literę skrótu…"), 2000)
             return True
         if not mods:
+            if key==Qt.Key.Key_E:
+                selected=self.window._selected_component
+                if view is not None:
+                    point=view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+                    item=next((i for i in view.scene.items(point) if i.data(0)=="component"),None)
+                    if item is not None: selected=item.component
+                if selected is not None: self.window.show_component_properties(selected)
+                return True
+            if key == Qt.Key.Key_C:
+                self.window.comment_action.trigger()
+                return True
             if key == Qt.Key.Key_H:
                 self.window.show_component_info()
                 return True

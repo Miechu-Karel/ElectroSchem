@@ -20,7 +20,7 @@ BY_NAME = {item.name: item for item in BUILT_IN_ITEMS}
 class Rc8Tests(unittest.TestCase):
     def test_value_toggle_shrinks_top_band_and_restores_it_after_rotation(self):
         for name, unit in (("Rezystor", "Ω"), ("Kondensator Ceramiczny", "nF"),
-                           ("Cewka Indukcyjna", "mH"), ("Bateria 9V", "V")):
+                           ("Cewka Indukcyjna", "mH"), ("Bateria", "V")):
             for angle in (0, 90, 180, 270):
                 with self.subTest(name=name, angle=angle):
                     c = ComponentInstance(BY_NAME[name].id, 300, 300, rotation=angle, value="100", unit=unit)

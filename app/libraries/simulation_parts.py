@@ -7,6 +7,9 @@ from app.libraries.simulation_catalog import P, CONTACT, approximate
 
 
 def part_behavior(d):
+    from app.libraries.alpha130_models import behavior
+    added = behavior(d)
+    if added: return added
     name = d.name
     if "Stabilizator" in name:
         return approximate("regulator", [P("sim_dropout", "Dropout voltage", "Minimalny spadek napięcia", "V", "1.2 V" if "1117" in name else "2 V"), P("sim_max_current", "Output current limit", "Limit prądu wyjściowego", "A", "1 A")])
@@ -34,7 +37,7 @@ def part_behavior(d):
         return approximate("converter", [P("sim_output_voltage", "Output voltage", "Napięcie wyjściowe", "V", "5 V"), P("sim_efficiency", "Efficiency (0–1)", "Sprawność (0–1)", default="0.9", minimum=.01, maximum=1), P("sim_max_current", "Output current limit", "Limit prądu wyjścia", "A", "1 A")], en="Averaged regulated DC model with input-power balance. No switching ripple/startup dynamics; buck/boost voltage range is enforced.", pl="Uśredniony model DC z bilansem mocy wejścia. Bez tętnień i rozruchu; uwzględnia zakres step-down/step-up.")
     if "ST1167" in name:
         return approximate("level_converter", en="RX uses HV-to-LV resistor dividers; TX uses a bidirectional MOS-switch approximation and 10 kΩ pull-ups. No parasitic capacitance/timing model.", pl="RX ma dzielnik HV→LV; TX ma dwukierunkowy model klucza MOS i podciągnięcia 10 kΩ. Bez pojemności pasożytniczych i modelu czasowego.")
-    if "Klawiatura Membranowa" in name:
+    if "Klawiatura Membranowa" in name or name=="Keypad 4x4":
         choices = (("none", "None", "Brak"),) + tuple((str(i), f"R{i//4+1} / C{i%4+1}", f"R{i//4+1} / C{i%4+1}") for i in range(16))
         return approximate("keypad", [P("sim_key", "Pressed key", "Naciśnięty klawisz", default="none", choices=choices)], en="One selected row/column contact; click to cycle through keys, then release.", pl="Jeden wybrany styk wiersz/kolumna; klikaj, aby zmieniać klawisz i zwolnić.")
     if "Przekaźnika" in name:

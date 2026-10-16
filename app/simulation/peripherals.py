@@ -101,7 +101,10 @@ def linearize(d, volts, ground, time, dt):
     if d.kind=="joystick":
         for pin,key in (("VRx","sim_x"),("VRy","sim_y")):
             position=p[key]; resistor(high,pins[pin],10000*(1-position)); resistor(pins[pin],low,10000*position)
-        resistor(pins["SW"],low,.001 if d.closed else 1e12)
+        if p.get("sim_switch_mode", "high") == "high": drive(pins["SW"], d.closed, enabled)
+        else:
+            resistor(pins["SW"],low,.001 if d.closed else 1e12)
+            if p.get("sim_internal_pullup", "true") == "true": resistor(high,pins["SW"],10000)
     elif d.kind=="ir_receiver": drive(pins["SIG"],not d.closed,enabled)
     elif d.kind=="ir_transmitter":
         s["active"]=enabled and voltage(pins["DAT"])>supply*.5

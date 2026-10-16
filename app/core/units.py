@@ -1,6 +1,7 @@
 """Rozpoznawanie przedrostków SI bez konwersji przez niedokładny float."""
 import re
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+from math import isfinite
 
 _NUMBER = r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?"
 _UNITS = {"ohm": "Ω", "ohms": "Ω", "om": "Ω", "ω": "Ω", "Ω": "Ω",
@@ -65,3 +66,34 @@ def default_unit_for(library_id: str) -> str:
     from app.libraries.built_in import get_definition
     definition = get_definition(library_id)
     return getattr(definition, "default_unit", "") if definition else ""
+
+
+def format_si(value, unit: str, significant: int = 4) -> str:
+    """Format a live numeric reading with an engineering SI prefix.
+
+    Keeps the displayed mantissa near 1..1000, so large/small resistance
+    readings do not turn into opaque values such as ``1.45e+19 Ω``.
+    """
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return str(value)
+    if not number.is_finite():
+        return "OL" if not isfinite(float(value)) else str(value)
+    if number == 0:
+        return f"0 {unit}".strip()
+    prefixes = _PREFIXES
+    exponent = max(-30, min(30, (number.copy_abs().adjusted() // 3) * 3))
+    with localcontext() as context:
+        context.prec = max(40, len(number.as_tuple().digits), abs(number.adjusted()) + significant + 8)
+        scaled = number.scaleb(-exponent)
+        places = significant - 1 - scaled.copy_abs().adjusted()
+        quantum = Decimal(1).scaleb(-places)
+        scaled = scaled.quantize(quantum, rounding=ROUND_HALF_UP)
+        if abs(scaled) >= 1000 and exponent < 30:
+            exponent += 3
+            scaled = scaled.scaleb(-3)
+        text = format(scaled, "f")
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+    return f"{text} {prefixes[exponent]}{unit}".strip()

@@ -38,8 +38,23 @@ SYMBOL_INFO = {
 
 
 def explanation(definition, language="en", custom=None):
+    from app.libraries.ic_info import description
+    info=description(definition,language)
+    if info: return info
+    from app.libraries.alpha139_parts import SPECS,behavior
+    chip=definition.name.removeprefix('Układ Scalony ')
+    if definition.name.startswith('Układ Scalony ') and chip in SPECS:
+        model=behavior(definition)
+        return chip+' — '+(model.note_pl if language=='pl' else model.note_en)
     pl = language == "pl"
     name, symbol = definition.name, definition.symbol
+    from app.libraries.usb_info import is_usb_port,explanation as usb_explanation
+    if is_usb_port(definition): return usb_explanation(definition,language)
+    from app.libraries.alpha130_models import behavior
+    from app.libraries.alpha134_models import behavior as behavior134
+    added = behavior134(definition) or behavior(definition)
+    if added:
+        return (added.note_pl if pl else added.note_en) or ("Uproszczony edukacyjny element elektryczny. Sprawdź opis modelu i wyprowadzenia." if pl else "Simplified educational electrical component. Check the model description and terminals.")
     if name=="Moduł kamery urządzenia":
         return ("Lokalny podgląd obrazu z kamery komputera w symulacji. Uruchomienie wymaga jawnej zgody w oknie kamery. Stop lub zamknięcie okna zwalnia kamerę i cofa zgodę. Obraz pozostaje tylko w pamięci; nie jest nagrywany ani wysyłany. VCC i GND są umownymi zaciskami modelu zasilania, nie fizycznym złączem USB/CSI. Nie emuluje sterownika kamery w kodzie płytki." if pl else
                 "Local live computer-camera preview in simulation. Starting requires explicit consent in the camera dialog. Stop or closing releases the camera and revokes consent. Frames remain in memory, without recording or transmission. VCC/GND are abstract power-model terminals, not a USB/CSI connector pinout. This does not emulate a board firmware camera driver.")

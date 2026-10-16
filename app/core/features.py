@@ -1,6 +1,6 @@
 """Możliwości tego wydania, niezależne od zapisanych preferencji użytkownika.
 
-rc14 wycofuje integrację AI. Stary klucz ani zgoda nie mogą jej włączyć.
-Kod historyczny pozostaje do przebudowy, lecz aplikacja go nie uruchamia.
+1.3 introduces a command-based assistant with explicit proposal approval.
+The historical add-only chat is not the editor's assistant entry point.
 """
-AI_AVAILABLE = False
+AI_AVAILABLE = True

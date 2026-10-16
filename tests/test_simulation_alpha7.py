@@ -73,6 +73,8 @@ class Alpha7Tests(unittest.TestCase):
             self.assertIn("Ctrl+Shift+S",text)
             self.assertNotIn("—",text); self.assertNotIn("–",text)
             self.assertIn("Symulacja" if language=="pl" else "Simulation",text)
+            for en,pl in (("USB ports","Porty USB"),("Gold pins","Goldpiny"),("Cables","Kable"),("Terminals","Terminale")):
+                self.assertIn(pl if language=="pl" else en,text)
             dialog.deleteLater()
         self.assertEqual(self.window.help_action.text(),"Instrukcja Obsługi")
         actions=self.window.toolbar.actions()

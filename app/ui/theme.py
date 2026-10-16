@@ -7,12 +7,12 @@ def application_icon(directory):
     """Let Qt select the supplied logo resolution for each window and DPI."""
     icon = QIcon()
     for size in (72,144,432,576):
-        path = directory / f"Ikonka ElektroSchema {size}x{size}.png"
+        path = directory / f"electroschem_icon_{size}x{size}.png"
         if path.is_file():
             icon.addFile(str(path),QSize(size,size))
     # Support older installations that still have the original single logo.
     if icon.isNull():
-        icon.addFile(str(directory / "Ikonka ElektroSchema.png"))
+        icon.addFile(str(directory / "electroschem_icon_144x144.png"))
     return icon
 
 

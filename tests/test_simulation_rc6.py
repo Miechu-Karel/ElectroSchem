@@ -4,6 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
 from pathlib import Path
 from copy import deepcopy
 import struct
+import time
 import unittest
 from unittest.mock import patch
 from PySide6.QtCore import Qt
@@ -18,6 +19,7 @@ from app.ui.buzzer_audio import BuzzerAudio,ToneStream
 from test_simulation_alpha2 import Bench
 
 APP=QApplication.instance() or QApplication([])
+APP.setQuitOnLastWindowClosed(False)
 USER_PROJECT=Path("C:/Users/miesz/Documents/EtectroSchem Projeky/Testy Przełączników.els")
 
 
@@ -101,7 +103,11 @@ class Rc6Tests(unittest.TestCase):
                 QTest.mousePress(button,Qt.MouseButton.LeftButton)
                 self.assertGreater(sim.circuit.result.brightness[leds[f"LED00{6+index%4}"]],.1)
                 QTest.mouseRelease(button,Qt.MouseButton.LeftButton)
-                self.assertEqual(key.parameters["sim_key"],"none")
+                deadline = time.monotonic() + 1
+                while key.parameters["sim_key"] != "none" and time.monotonic() < deadline:
+                    APP.processEvents()
+                    time.sleep(.01)
+                self.assertEqual(key.parameters["sim_key"],"none", sim.log.toPlainText())
                 self.assertLess(sim.circuit.result.brightness[leds[f"LED00{6+index%4}"]],.001)
             self.assertEqual(window.project.to_dict(),before)
         finally:

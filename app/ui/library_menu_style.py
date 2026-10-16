@@ -1,7 +1,16 @@
 """Paint secondary aliases after Qt's stylesheet, which overrides palettes."""
 from PySide6.QtWidgets import QMenu
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt,QObject,QEvent
 from PySide6.QtGui import QColor,QPalette,QPainter
+
+class CustomMenuInput(QObject):
+    """RMB opens definition settings and must never place the part."""
+    def eventFilter(self,obj,event):
+        if event.type() in {QEvent.Type.MouseButtonPress,QEvent.Type.MouseButtonRelease} and event.button()==Qt.MouseButton.RightButton:
+            if event.type()==QEvent.Type.MouseButtonRelease:
+                obj.customContextMenuRequested.emit(event.position().toPoint())
+            return True
+        return super().eventFilter(obj,event)
 
 
 class LibrarySubMenu(QMenu):

@@ -58,9 +58,12 @@ def apply_proposal(project: Project, sheet_index: int, payload: dict) -> Project
         component = by_key.get(key)
         if component is None:
             raise ValueError("Unknown connection target")
-        definition = get_definition(component.library_id, result.custom_components)
+        from app.libraries.built_in import get_instance_definition
+        definition = get_instance_definition(component, result.custom_components)
         if definition is None or index >= len(definition.pins):
             raise ValueError("Unknown pin")
+        if definition.symbol=='breadboard' or (definition.symbol=='goldpin' and index==0):
+            raise ValueError('Jumper contact accepts cables only; use the PCB end for drawn wires')
         pin = definition.pins[index]
         x, y = pin.x, pin.y
         # Ćwierćobroty liczymy bez błędów trygonometrii, identycznie jak Qt.
@@ -83,9 +86,10 @@ def apply_proposal(project: Project, sheet_index: int, payload: dict) -> Project
         block = title_block_rect(sheet)
         corner = QPointF(block.left()-GRID_STEP, block.top()-GRID_STEP)
         routes = [route(a, b), list(reversed(route(b, a))), route(a, corner)[:-1]+route(corner, b)]
-        points = next((p for p in routes if route_allowed(sheet, p)), None)
+        from app.canvas.assistant_routing import route as readable_route
+        points = readable_route(result,sheet,a,b,(start.id,end.id))
         if points is None:
-            raise ValueError("Wire crosses title block / Przewód przecina tabliczkę rysunkową")
+            raise ValueError("No valid wire route: avoid title block and overlaps longer than half a cell / Brak poprawnej trasy: omijaj tabliczkę i nakładanie przewodów ponad pół kratki")
         sheet.wires.append(Wire(x1, y1, x2, y2, points=[[p.x(), p.y()] for p in points], start_component_id=start.id,
                                start_pin_index=raw["from_pin"], end_component_id=end.id,
                                end_pin_index=raw["to_pin"], start_pin_number=number1,

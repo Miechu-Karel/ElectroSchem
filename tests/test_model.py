@@ -4,8 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from zipfile import ZipFile
+from unittest.mock import patch
 
-from app.core.models import Annotation, Project, Sheet, Wire
+from app.core.models import Annotation, FORMAT_VERSION, Project, Sheet, Wire
 from app.core.project_file import load_project, save_project
 from app.core.units import parse_value
 from app.libraries.built_in import BUILT_IN_ITEMS
@@ -56,6 +57,16 @@ class ModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)/"test.els"
             save_project(destination, project)
+            with ZipFile(destination) as package:
+                manifest = json.loads(package.read("manifest.json"))
+                saved_project = json.loads(package.read("project.json"))
+            self.assertEqual(manifest["format_version"], FORMAT_VERSION)
+            self.assertEqual(saved_project["format_version"], FORMAT_VERSION)
+            self.assertEqual(manifest["format_version"], 4)
+            # Simulate a release whose reader supports at most ELS v3.
+            with patch("app.core.project_file.FORMAT_VERSION", 3):
+                with self.assertRaisesRegex(ValueError, "Unsupported ELS package version"):
+                    load_project(destination)
             restored = load_project(destination)
         self.assertEqual(restored.to_dict(), project.to_dict())
 

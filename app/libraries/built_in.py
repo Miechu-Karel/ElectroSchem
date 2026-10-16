@@ -40,7 +40,7 @@ class LibraryItem:
 
 
 _RAW_LIBRARY: dict[str, list[str]] = {
-    "Elementy pasywne": ["Rezystor", "Kondensator Ceramiczny", "Kondensator Elektrolityczny", "Kondensator Tantalowy", "Potencjometr Obrotowy", "Potencjometr Suwakowy", "Cewka Indukcyjna", "Kwarc Rezonator 16MHz", "Kwarc Rezonator 8MHz", "Fotorezystor LDR", "Termistor NTC", "Enkoder Obrotowy"],
+    "Elementy pasywne": ["Rezystor", "Rezystor nastawny", "Kondensator Ceramiczny", "Kondensator Elektrolityczny", "Kondensator Tantalowy", "Potencjometr Obrotowy", "Potencjometr Suwakowy", "Cewka Indukcyjna", "Kwarc Rezonator 16MHz", "Kwarc Rezonator 8MHz", "Fotorezystor LDR", "Termistor NTC", "Enkoder Obrotowy"],
     "Półprzewodniki": ["Dioda Prostownicza 1N4007", "Dioda Zenera", "Dioda LED 3mm", "Dioda LED 5mm", "Dioda RGB", "Dioda Schottky", "Tranzystor NPN BC547", "Tranzystor PNP BC557", "Tranzystor N-MOSFET IRF540N", "Tranzystor P-MOSFET", "Tyrystor", "Triak", "Optoizolator PC817"],
     "Zasilanie i połączenia": ["Stabilizator Liniowy LM7805", "Stabilizator Liniowy LM7812", "Stabilizator AMS1117-3.3", "Bateria 9V", "Koszyk na Akumulator 18650", "Akumulator Li-Po 3.7V", "Złącze Goldpin Męski", "Złącze Goldpin Żeński", "Terminale Śrubowe ARK 2-pin", "Terminale Śrubowe ARK 3-pin", "Szyna Zasilania VCC", "Szyna Zasilania +5V", "Szyna Zasilania +3.3V", "Szyna Zasilania +12V", "Masa GND", "Moduł Ładowania TP4056", "Przetwornik DC-DC Step-Down LM2596", "Przetwornik DC-DC Step-Up MT3608", "Konwerter Poziomów Logicznych"],
     "Układy i sterowniki": ["Układ Scalony NE555", "Układ Scalony LM358", "Bramka Logiczna 74HC00", "Bramka Logiczna 74HC04", "Bramka Logiczna 74HC02", "Bramka Logiczna 74HC08", "Bramka Logiczna 74HC14", "Bramka Logiczna 74HC32", "Bramka Logiczna 74HC86", "Układ Logiczny CD4093BE", "Bramka AND", "Bramka OR", "Bramka NOT", "Bramka NAND", "Bramka NOR", "Bramka XOR", "Bramka XNOR", "Przerzutnik 74HC74", "Rejestr Przesuwny 74HC595", "Ekspander Portów MCP23017", "Ekspander Portów MCP23008", "MCP2008", "Przetwornik ADC ADS1115", "Potencjometr Cyfrowy MCP41010", "Generator Sygnałowy XR2206", "Mostek H L298N", "Sterownik Silników Krokowych A4988", "Sterownik Silników Krokowych TMC2208"],
@@ -48,6 +48,7 @@ _RAW_LIBRARY: dict[str, list[str]] = {
     "Czujniki": ["Czujnik Odległości HC-SR04", "Czujnik Ruchu PIR HC-SR501", "Czujnik Temperatury DHT11", "Czujnik Temperatury DHT22", "Czujnik Temperatury DS18B20", "Czujnik Natężenia Światła BH1750", "Czujnik Wilgotności Gleby", "Czujnik Gazu MQ-2", "Czujnik Jakości Powietrza BME280", "Akcelerometr MPU6050", "Moduł GPS NEO-6M", "Czujnik Płomienia", "Czujnik Dźwięku MAX9814", "Czujnik Dźwięku Iduino ST1146"],
     "Mikrokontrolery i SBC": ["Seeed Studio XIAO ESP32-S3 Sense (z kamerą OV3660)", "Arduino Uno R3", "Arduino Nano", "Arduino Mega 2560", "Arduino Leonardo", "Raspberry Pi Pico", "Raspberry Pi Pico W", "Raspberry Pi Zero 2 W", "Raspberry Pi 4 Model B", "Raspberry Pi 5", "ESP32 DevKitC", "ESP32-S3 NodeMCU", "STM32 Nucleo-F401RE", "Teensy 4.1", "Microbit V2", "Banana Pi M5", "Orange Pi 3 LTS"],
     "Napędy": ["Silnik Krokowy NEMA 17", "Serwomechanizm SG90", "Serwomechanizm MG996R"],
+    "Elementy interaktywne": [],
     "Własne": [],
 }
 
@@ -64,11 +65,29 @@ from app.libraries.inventory_parts import install as install_inventory
 from app.libraries.pin_catalog import add as add_catalog, terminals
 for category,name in install_inventory(CATALOG,add_catalog,terminals):
     _RAW_LIBRARY[category].append(name)
+from app.libraries.alpha130_parts import install as install_alpha130
+for category, name in install_alpha130(add_catalog, terminals):
+    _RAW_LIBRARY[category].append(name)
+from app.libraries.alpha134_parts import install as install_alpha134
+_RAW_LIBRARY["Narzędzia pomiarowe"] = []
+for category, name in install_alpha134(add_catalog, terminals):
+    _RAW_LIBRARY[category].append(name)
+from app.libraries.alpha139_parts import install as install_alpha139
+for category,name in install_alpha139(add_catalog,terminals):
+    _RAW_LIBRARY[category].append(name)
+from app.libraries.alpha1311_parts import install as install_alpha1311
+for category,name in install_alpha1311(add_catalog,terminals):
+    _RAW_LIBRARY[category].append(name)
+
+# Preserve the original stable ID used in saved projects, but show a clearer
+# name in the component library and simulation UI.
+CATALOG["Klawiatura Membranowa 4x4"]["display_name"]="Keypad 4x4"
+CATALOG["Klawiatura Membranowa 4x4"]["name_en"]="Keypad 4x4"
 
 # Starsze projekty zachowują definicje i stabilne identyfikatory; porządkowanie
 # menu nigdy nie usuwa symboli, do których odwołuje się istniejący plik ELS.
-HIDDEN_NAMES = {"Konwerter Poziomów Logicznych", "Akumulator Li-Po 3.7V", "Złącze Goldpin Męski", "Złącze Goldpin Żeński", "Układ MCP2008 (niezweryfikowany)",
-                "Wyświetlacz LCD 16x2 I2C", "Moduł Przekaźnika 1-kanałowy"}
+HIDDEN_NAMES = {"Listwa Goldpin 1x40", "Konwerter Poziomów Logicznych", "Akumulator Li-Po 3.7V", "Złącze Goldpin Męski", "Złącze Goldpin Żeński", "Układ MCP2008 (niezweryfikowany)",
+                "Wyświetlacz LCD 16x2 I2C", "Moduł Przekaźnika 1-kanałowy", "Gniazdo Raspberry Pi 2x20", "Zasilacz Raspberry Pi USB-C 27 W"}
 
 
 def _identifier(category: str, name: str) -> str:
@@ -84,6 +103,7 @@ def _make_item(category: str, name: str, data: dict, library_id: str = "") -> Li
     Duże układy mają dwa boki; numeracja nie jest zamieniana na kolejność
     graficzną. Wszystkie końcówki są wielokrotnością 20 jednostek sceny.
     """
+    if name == "Bateria 9V": data=dict(data,display_name="Bateria",name_en="Battery",prefix="Bat")
     symbol = data.get("symbol", "module")
     raw_pins = data.get("pins", ["1", "2"])
     if isinstance(raw_pins, str):
@@ -99,7 +119,7 @@ def _make_item(category: str, name: str, data: dict, library_id: str = "") -> Li
         count = len(raw_pins)
         if count <= 8:
             width = max(120, ceil((count * 40 + 40) / 40) * 40)
-            height = 80
+            height = max(80,ceil(data.get("height",80)/40)*40)
         elif four_sides:
             side_count = ceil(count / 4)
             width = height = ceil((side_count * 20 + 60) / 40) * 40
@@ -133,7 +153,7 @@ def _make_item(category: str, name: str, data: dict, library_id: str = "") -> Li
             x, y = (-40, 0) if index == 0 else (40, 0)
         pins.append(PinSpec(number, pin_name, x, y))
     return LibraryItem(
-        id=library_id or _identifier(category, name), name=data.get("display_name", name), category=category,
+        id=library_id or data.get("library_id") or _identifier(category, name), name=data.get("display_name", name), category=category,
         # AI i edytor użytkownika zapisują pełną nazwę pola. Starsze wpisy
         # katalogu używają skrótu prefix; oba formaty są zgodne przy odczycie.
         name_en=data.get("name_en", name), reference_prefix=data.get("reference_prefix", data.get("prefix", "Cmp")),
@@ -148,6 +168,7 @@ def _make_item(category: str, name: str, data: dict, library_id: str = "") -> Li
 BUILT_IN_ITEMS = [_make_item(category, name, CATALOG[name])
                   for category, names in _RAW_LIBRARY.items() for name in names]
 ITEM_BY_ID = {item.id: item for item in BUILT_IN_ITEMS}
+HIDDEN_NAMES.add('Płytka stykowa')
 AVAILABLE_ITEMS = [item for item in BUILT_IN_ITEMS if item.name not in HIDDEN_NAMES]
 
 # Dawny szablon usuwamy z menu, nie z odczytu starych projektów. Zachowanie
@@ -160,6 +181,9 @@ _LEGACY_TEMPLATE = _make_item("Własne", "Szablon Elementu Customowego", {
 
 
 def item_name(item: LibraryItem, language: str = "en") -> str:
+    from app.libraries.ic_info import label
+    friendly=label(item,language)
+    if friendly: return friendly
     return item.name if language.lower().startswith("pl") else (item.name_en or item.name)
 
 
@@ -195,6 +219,7 @@ def validate_custom_definition(entry: dict) -> dict:
                 not isfinite(value) or not 40 <= value <= 2000 or value % 40):
             raise ValueError("Custom dimensions must be 40..2000 and multiples of 40")
     pins = data.get("pins")
+    free_pins=data.get('asset',{}).get('case',{}).get('free_pins') is True
     if not isinstance(pins, list) or not 1 <= len(pins) <= 256:
         raise ValueError("Custom component requires 1..256 pins")
     seen_numbers, seen_positions = set(), set()
@@ -207,14 +232,16 @@ def validate_custom_definition(entry: dict) -> dict:
             text = pin.get(field)
             if not isinstance(text, str) or not text.strip() or len(text) > 100 or "\x00" in text:
                 raise ValueError(f"Invalid custom pin {field}")
+        if 'identity' in pin and (not isinstance(pin['identity'],str) or not pin['identity'] or len(pin['identity'])>100):
+            raise ValueError("Invalid custom pin identity")
         for field in ("x", "y"):
             value = pin.get(field)
             if (isinstance(value, bool) or not isinstance(value, (float, int)) or
-                    not isfinite(value) or value % 20):
+                    not isfinite(value) or (value % 20 and not free_pins)):
                 raise ValueError("Custom pins must be finite and aligned to the grid")
         x, y = pin["x"], pin["y"]
         hw, hh = data["width"] / 2, data["height"] / 2
-        if abs(x) > hw or abs(y) > hh or (abs(x) != hw and abs(y) != hh):
+        if abs(x) > hw or abs(y) > hh or (not free_pins and abs(x) != hw and abs(y) != hh):
             raise ValueError("Custom pins must lie on the component boundary")
         if pin["number"] in seen_numbers or (x, y) in seen_positions:
             raise ValueError("Custom pin numbers and positions must be unique")
@@ -222,12 +249,33 @@ def validate_custom_definition(entry: dict) -> dict:
         seen_positions.add((x, y))
         copied_pins.append(pin)
     data["pins"] = copied_pins
+    if "asset" in data:
+        from app.core.assets import validate_asset
+        data["asset"]=validate_asset(data["asset"])
+        if len(data["asset"]["exports"])!=len(copied_pins): raise ValueError("Asset ports do not match the case")
+        for shape in data['asset'].get('case',{}).get('shapes',[]):
+            from app.canvas.case_shapes import path
+            rect=path(shape).boundingRect(); x,y,w,h=rect.x(),rect.y(),rect.width(),rect.height()
+            if x < -data['width']/2 or y < -data['height']/2 or x+w>data['width']/2 or y+h>data['height']/2: raise ValueError('Case shape outside its boundary')
+        for region in data['asset'].get('case',{}).get('regions',[]):
+            x,y,w,h=region['rect']
+            if x < -data['width']/2 or y < -data['height']/2 or x+w>data['width']/2 or y+h>data['height']/2: raise ValueError('Case region outside its boundary')
     # Dodatkowe notatki/opis działania pozostają tekstem, nigdy kodem.
     for field in ("description", "behavior", "variant", "source", "scope"):
         if field in data and (not isinstance(data[field], str) or len(data[field]) > 10000):
             raise ValueError(f"Invalid custom component {field}")
     return data
 
+
+def get_instance_definition(component,custom_components=None):
+    definition=get_definition(component.library_id,custom_components)
+    if definition and definition.name=="Przełącznik wielostopniowy":
+        from dataclasses import replace
+        count=int(component.properties.get("sim_outputs","6"))
+        if not 1<=count<=10: raise ValueError("Switch outputs must be 1..10")
+        pins=(PinSpec("1","COM",-60,0),)+tuple(PinSpec(str(i+1),str(i),60,(i-1-count//2)*20) for i in range(1,count+1))
+        return replace(definition,pins=pins,width=120,height=max(80,(count+2)*20),symbol="multi_switch")
+    return definition
 
 def get_definition(library_id: str, custom_components=None) -> LibraryItem | None:
     """Własne symbole są danymi projektu, a nie wykonywalnym kodem Pythona."""

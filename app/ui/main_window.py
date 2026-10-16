@@ -16,7 +16,7 @@ from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence, QCursor
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow,
     QMenu, QMessageBox, QStatusBar, QTabWidget, QToolBar, QToolButton,
-    QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QWidget,
+    QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QWidget, QComboBox,
 )
 
 from app.canvas.schematic_view import SchematicView
@@ -35,17 +35,21 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.2.1"
-ICON_DIR = Path(__file__).resolve().parents[2] / "Ikonki"
+APP_VERSION = "1.3.0"
+ICON_DIR = Path(__file__).resolve().parents[2] / "icons"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
 LIBRARY_GROUPS = (
-    ("Electronic components", "Elementy elektroniczne", "Elementy Elektroniczne.png",
+    ("Electronic components", "Elementy elektroniczne", "electronic_components.png",
      {"Elementy pasywne", "Półprzewodniki", "Zasilanie i połączenia"}),
-    ("Sensors, modules and drives", "Czujniki, moduły i napędy", "Czujnik.png", {"Czujniki", "Moduły i interfejsy", "Napędy"}),
-    ("Integrated circuits", "Układy scalone", "Domyślne Układy Scalone.png", {"Układy i sterowniki"}),
-    ("Custom components", "Customowe elementy", "Customowe Elementy.png", {"Własne"}),
-    ("Microcontrollers and computers", "Mikrokontrolery i mikrokomputery", "Mikrokontrolery.png", {"Mikrokontrolery i SBC"}),
+    ("Sensors, modules and drives", "Czujniki, moduły i napędy", "sensor.png", {"Czujniki", "Moduły i interfejsy", "Napędy", "Dźwięk"}),
+    ("Integrated circuits", "Układy scalone", "ic_library.png", {"Układy i sterowniki"}),
+    ("Custom components", "Customowe elementy", "custom_components.png", {"Własne"}),
+    ("Microcontrollers and computers", "Mikrokontrolery i mikrokomputery", "microcontrollers.png", {"Mikrokontrolery i SBC"}),
+    ("Favorites", "Ulubione", "favorites.png", set()),
+    ("Cables and connectors", "Kable i złącza", "cables.png", {"Kable"}),
+    ("Measurement tools", "Narzędzia pomiarowe", "measurement_tool.png", {"Narzędzia pomiarowe"}),
+    ("Interactive components", "Elementy interaktywne", "interactive_components.png", {"Elementy interaktywne"}),
 )
 
 
@@ -100,7 +104,11 @@ class MainWindow(QMainWindow):
 
     def _icon(self,filename):
         from app.ui.theme import themed_icon
-        return themed_icon(ICON_DIR/filename,self.settings.theme=="dark")
+        path=ICON_DIR/filename
+        if filename=='cables.png' and not path.is_file():
+            from app.ui.cable_icon import cable_icon
+            return cable_icon(self.settings.theme=='dark')
+        return themed_icon(path,self.settings.theme=="dark")
 
     def _action(self, en, pl, callback=None, shortcut=None, icon=None, checkable=False):
         action = QAction(self.t(en, pl), self)
@@ -120,17 +128,18 @@ class MainWindow(QMainWindow):
         self.open_action = self._action("Open project…", "Otwórz projekt…", self.open_project, QKeySequence.StandardKey.Open)
         self.save_action = self._action("Save", "Zapisz", self.save_project, QKeySequence.StandardKey.Save)
         self.save_as_action = self._action("Save as…", "Zapisz jako…", self.save_project_as, QKeySequence.StandardKey.SaveAs)
+        self.save_asset_action = self._action("Save as Asset…", "Zapisz jako Asset…", self.save_as_asset)
         self.export_pdf_action = self._action("PDF", "PDF", self.export_pdf)
         self.export_png_action = self._action("PNG", "PNG", lambda: self._export("png"))
         self.export_svg_action = self._action("SVG", "SVG", lambda: self._export("svg"))
         self.help_action = self._action("Usage Instructions", "Instrukcja Obsługi", self.show_help)
-        self.component_help_action = self._action("Component help (H)", "Pomoc elementu (H)", self.show_component_info, icon="Pomoc.png")
+        self.component_help_action = self._action("Component help (H)", "Pomoc elementu (H)", self.show_component_info, icon="help.png")
         self.standard_actions = {}
         for standard in ("EN", "PN", "ISO", "IEEE/ANSI"):
             action = self._action(standard, standard, lambda checked=False, value=standard: self.set_sheet_standard(value), checkable=True)
             self.standard_actions[standard] = action
-        self.add_sheet_action = self._action("Add sheet (Shift+A, S)", "Dodaj arkusz (Shift+A, S)", self.add_sheet, icon="Dodaj Arkusz.png")
-        self.ai_action = self._action("AI assistant (Shift+A, I)", "Asystent AI (Shift+A, I)", self.show_ai, icon="Funkcje AI.png")
+        self.add_sheet_action = self._action("Add sheet (Shift+A, S)", "Dodaj arkusz (Shift+A, S)", self.add_sheet, icon="add_sheet.png")
+        self.ai_action = self._action("AI assistant (Shift+A, I)", "Asystent AI (Shift+A, I)", self.show_ai, icon="ai_features.png")
         self.datasheet_action = self._action("Analyse datasheet PDF…", "Analizuj dokumentację PDF…", self.show_datasheet_ai)
         self.clipboard_actions = [self._action(en, pl, lambda checked=False, op=op: self.selection_command(op))
                                   for en, pl, op in (
@@ -138,40 +147,45 @@ class MainWindow(QMainWindow):
                                       ("Cut (Ctrl+X)", "Wytnij (Ctrl+X)", "cut"),
                                       ("Copy (Ctrl+C)", "Kopiuj (Ctrl+C)", "copy"),
                                       ("Paste (Ctrl+V)", "Wklej (Ctrl+V)", "paste"))]
-        self.fit_page_action = self._action("Fit sheet", "Dopasuj arkusz", self.fit_current_page, icon="Zeruj Zoom.png")
-        self.select_action = self._action("Select (S)", "Zaznaczanie (S)", lambda: self.set_active_tool("select"), icon="Kursor.png", checkable=True)
-        self.wire_action = self._action("Draw connections (D)", "Rysuj połączenia (D)", lambda: self.set_active_tool("wire"), icon="Rysik.png", checkable=True)
-        self.delete_action = self._action("Delete tool", "Narzędzie usuwania", lambda: self.set_active_tool("delete"), icon="Usuń v2.png", checkable=True)
-        self.comment_action = self._action("Add comment", "Dodaj komentarz", lambda: self.set_active_tool("comment"), icon="Pisz.png", checkable=True)
+        self.fit_page_action = self._action("Fit sheet", "Dopasuj arkusz", self.fit_current_page, icon="reset_zoom.png")
+        self.select_action = self._action("Select (S)", "Zaznaczanie (S)", lambda: self.set_active_tool("select"), icon="cursor.png", checkable=True)
+        self.wire_action = self._action("Draw connections (D)", "Rysuj połączenia (D)", lambda: self.set_active_tool("wire"), icon="pencil.png", checkable=True)
+        self.delete_action = self._action("Delete tool", "Narzędzie usuwania", lambda: self.set_active_tool("delete"), icon="delete.png", checkable=True)
+        self.comment_action = self._action("Add comment (C)", "Dodaj komentarz (C)", lambda: self.set_active_tool("comment"), icon="type.png", checkable=True)
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
         for action in (self.select_action, self.wire_action, self.delete_action, self.comment_action):
             self.tool_group.addAction(action)
         self.select_action.setChecked(True)
-        self.undo_action = self._action("Undo", "Cofnij", self.undo, QKeySequence.StandardKey.Undo, "Cofnij.png")
-        self.redo_action = self._action("Redo", "Ponów", self.redo, icon="Ponów.png")
+        self.undo_action = self._action("Undo", "Cofnij", self.undo, QKeySequence.StandardKey.Undo, "undo.png")
+        self.redo_action = self._action("Redo", "Ponów", self.redo, icon="redo.png")
         self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
-        self.properties_action = self._action("Component properties…", "Właściwości elementu…", self.edit_selected_properties, icon="Właściwości.png")
+        self.properties_action = self._action("Component properties…", "Właściwości elementu…", self.edit_selected_properties, icon="properties.png")
         self.properties_action.setEnabled(False)
-        self.custom_action = self._action("Create custom component…", "Utwórz customowy element…", self.create_custom_component, icon="Customowe Elementy.png")
+        self.custom_action = self._action("Create custom component…", "Utwórz customowy element…", self.create_custom_component, icon="custom_components.png")
         self.settings_action = self._action("Settings…", "Ustawienia…", lambda: self.show_settings())
-        self.code_action = self._action("Edit code…", "Edytuj kod…", self.open_code, icon="Edytuj Kod.png")
-        self.simulation_action = self._action("Simulation sandbox", "Sandbox symulacji", self.show_simulation, "F5", icon="Uruchom Symulację.png")
-        self.add_component_action = self._action("Add component", "Dodaj element", self.open_add_menu, icon="Dodaj element.png")
-        self.search_action = self._action("Find component…", "Wyszukaj element…", self.search_components, icon="Wyszukaj.png")
+        self.code_action = self._action("Edit code…", "Edytuj kod…", self.open_code, icon="edit_code.png")
+        self.simulation_action = self._action("Simulation sandbox", "Sandbox symulacji", self.show_simulation, "F5", icon="run_simulation.png")
+        self.add_component_action = self._action("Add component", "Dodaj element", self.open_add_menu, icon="add_component.png")
+        self.search_action = self._action("Find component…", "Wyszukaj element…", self.search_components, icon="search.png")
         self.document_action = self._action("Drawing information…", "Dane tabliczki rysunkowej…", self.edit_document_info)
         self.exit_action = self._action("Exit", "Zakończ", self.close)
         self.library_actions = []
         for index, (en, pl, icon, _) in enumerate(LIBRARY_GROUPS):
-            letter = "ESICM"[index]
+            letter = "ESICMFPKT"[index]
             self.library_actions.append(self._action(
                 en + f" (Ctrl+A, {letter})", pl + f" (Ctrl+A, {letter})",
                 lambda checked=False, i=index: self.open_library(i), icon=icon))
+            if index==5: self.library_actions[-1].setToolTip("F: " + self.t("add/remove selected favorite; Shift+F: reuse", "dodaj/usuń zaznaczony element z Ulubionych; Shift+F: użyj ponownie"))
+            if index==5 and self.library_actions[-1].icon().isNull():
+                from PySide6.QtWidgets import QStyle
+                self.library_actions[-1].setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogYesButton))
+                self.library_actions[-1].setProperty("iconFile",None)
 
     def _create_menu(self):
         self.menuBar().clear()
         file_menu = self.menuBar().addMenu(self.t("File", "Plik"))
-        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action,self.save_asset_action])
         file_menu.addSeparator()
         export_menu = file_menu.addMenu(self.t("Export…", "Eksportuj…"))
         export_menu.addActions([self.export_pdf_action, self.export_png_action, self.export_svg_action])
@@ -182,7 +196,7 @@ class MainWindow(QMainWindow):
         edit_menu.addActions(self.clipboard_actions)
         tools_menu = self.menuBar().addMenu(self.t("Tools", "Narzędzia"))
         library = tools_menu.addMenu(self.t("Add component", "Dodaj element"))
-        library.setIcon(self._icon("Dodaj element.png"))
+        library.setIcon(self._icon("add_component.png"))
         library.addActions(self.library_actions)
         tools_menu.addActions([self.custom_action, self.add_sheet_action, self.comment_action])
         tools_menu.addSeparator()
@@ -193,6 +207,7 @@ class MainWindow(QMainWindow):
         tools_menu.addActions([self.search_action, self.fit_page_action])
         tools_menu.addSeparator()
         tools_menu.addActions([self.code_action, self.simulation_action])
+        tools_menu.addAction(self.ai_action)
         options_menu = self.menuBar().addMenu(self.t("Options", "Opcje"))
         options_menu.addActions([self.settings_action, self.help_action])
         standards = options_menu.addMenu(self.t("Sheet standard", "Norma arkusza"))
@@ -250,6 +265,7 @@ class MainWindow(QMainWindow):
         self.toolbar.addAction(self.component_help_action)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.simulation_action)
+        self.toolbar.addAction(self.ai_action)
         self.addToolBar(Qt.ToolBarArea.RightToolBarArea, self.toolbar)
 
     def _translate_ui(self):
@@ -258,16 +274,16 @@ class MainWindow(QMainWindow):
             action.setText(self.t(en, pl))
             action.setToolTip(self.t(en, pl))
             if action.property("iconFile"): action.setIcon(self._icon(action.property("iconFile")))
-        self.ai_action.setVisible(AI_AVAILABLE)
+        self.ai_action.setVisible(AI_AVAILABLE and self.settings.ai_provider != "none")
         self.datasheet_action.setVisible(AI_AVAILABLE)
-        self.ai_action.setEnabled(AI_AVAILABLE and bool(self.settings.api_key))
-        if not self.settings.api_key and self.ai_panel is not None:
+        self.ai_action.setEnabled(AI_AVAILABLE and self.settings.ai_provider != "none")
+        if self.settings.ai_provider == "none" and self.ai_panel is not None:
             self.ai_panel.cancel()
             self.ai_dock.hide()
-        self.datasheet_action.setEnabled(AI_AVAILABLE and bool(self.settings.api_key))
-        if not self.settings.api_key:
-            self.ai_action.setToolTip(self.t("Add a Gemini API key in Settings to enable AI.",
-                                             "Podaj klucz API Gemini w ustawieniach, aby włączyć AI."))
+        self.datasheet_action.setEnabled(AI_AVAILABLE and self.settings.ai_provider != "none" and bool(self.settings.api_key))
+        if not (self.settings.openai_api_key if self.settings.ai_provider == "openai" else self.settings.api_key):
+            self.ai_action.setToolTip(self.t("Configure the selected provider's API key in Settings to enable AI.",
+                                             "Ustaw klucz API wybranego dostawcy w ustawieniach, aby włączyć AI."))
         self.tools_heading.setText(self.t("BASIC TOOLS", "PODSTAWOWE NARZĘDZIA"))
         self.toolbar.setWindowTitle(self.t("Basic tools", "Podstawowe narzędzia"))
         if self.project.sheets:
@@ -342,46 +358,100 @@ class MainWindow(QMainWindow):
     def _populate_library_menu(self, menu, index, menu_pos):
         """Jedno źródło struktury dla ikon kategorii i wspólnego menu."""
         categories = LIBRARY_GROUPS[index][3]
-        entries = [item for item in AVAILABLE_ITEMS if item.category in categories]
+        from app.simulation.jumper import CABLE_IDS
+        connector_ids={item.id for item in AVAILABLE_ITEMS if item.id in CABLE_IDS or item.symbol=='goldpin' or 'Goldpin' in item.name or item.name.startswith(('Port USB','Port Lightning','Terminale Śrubowe','Gniazdo'))}
+        entries = [item for item in AVAILABLE_ITEMS if item.category in categories and item.id not in connector_ids]
+        if index==6: entries=[item for item in AVAILABLE_ITEMS if item.id in connector_ids]
         secondary={item.id:group for item in AVAILABLE_ITEMS for category,group in secondary_locations(item)
-                   if category in categories and item.category not in categories}
-        entries += [item for item in AVAILABLE_ITEMS if item.id in secondary]
+                   if category in categories}
+        entries += [item for item in AVAILABLE_ITEMS if item.id in secondary and item not in entries]
+        if index==5:
+            entries=[get_definition(identity,self.project.custom_components) for identity in self.settings.favorite_components]
+            entries=[item for item in entries if item is not None]
         if index == 3:
-            entries = [get_definition(entry["id"], self.project.custom_components)
-                       for entry in self.project.custom_components]
+            entries = list(self.project.custom_components)
+            try:
+                from app.core.assets import load_assets
+                seen={d["id"] for d in entries}; entries += [d for d in load_assets() if d["id"] not in seen]
+            except (OSError,ValueError) as error: self.statusBar().showMessage(str(error),8000)
+            entries = [get_definition(entry["id"], entries) for entry in entries]
             entries = [item for item in entries if item is not None]
         if not entries:
             menu.addAction(self.t("[NONE]", "[BRAK]")).setEnabled(False)
         submenus = {}
-        for item in sorted(entries, key=library_sort_key):
-            if index == 3:
-                target = menu.addMenu(item_name(item, self.settings.language))
-                target.addAction(self.t("Edit definition…", "Edytuj definicję…"),
-                                 lambda checked=False, identity=item.id: self.edit_custom_component(identity))
-                target.addAction(self.t("Delete from library…", "Usuń z biblioteki…"),
-                                 lambda checked=False, identity=item.id: self.delete_custom_component(identity))
-                target.addSeparator()
+        if index==6:
+            from app.ui.library_menu_style import LibrarySubMenu
+            for en,pl in (("USB ports","Porty USB"),("Gold pins","Goldpiny"),("Cables","Kable"),("Terminals","Terminale")):
+                submenu=LibrarySubMenu(self.t(en,pl),menu)
+                submenus[(en,pl)]=submenu
+                menu.addMenu(submenu)
+        if index in {3,5}:
+            menu.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            from app.ui.library_menu_style import CustomMenuInput
+            menu._custom_input=CustomMenuInput(menu); menu.installEventFilter(menu._custom_input)
+            def custom_context(pos):
+                action=menu.actionAt(pos)
+                if not action or not action.data(): return
+                identity=action.data(); popup=QMenu(menu)
+                if index==5:
+                    def remove():
+                        if self.remove_favorite(identity): menu.removeAction(action)
+                    popup.addAction(self.t('Remove from favorites','Usuń z Ulubionych'),remove)
+                else:
+                    popup.addAction(self.t("Edit definition…", "Edytuj definicję…"),lambda:self.edit_custom_component(identity))
+                    popup.addAction(self.t("Delete from library…", "Usuń z biblioteki…"),lambda:self.delete_custom_component(identity))
+                popup.exec(menu.mapToGlobal(pos)); popup.deleteLater()
+            menu.customContextMenuRequested.connect(custom_context)
+        placements=[]
+        for item in sorted(entries,key=library_sort_key):
+            primary=item.category in categories or index in {3,5,6,7}
+            if primary: placements.append((item,subgroup(item),False))
+            if item.id in secondary: placements.append((item,secondary[item.id],True))
+        for item,group,is_secondary in placements:
+            if index==6:
+                if item.id in CABLE_IDS:
+                    group=('Cables','Kable')
+                elif item.symbol=='goldpin' or 'Goldpin' in item.name:
+                    group=('Gold pins','Goldpiny')
+                elif item.name.startswith(('Port USB','Port Lightning')):
+                    group=('USB ports','Porty USB')
+                elif item.name.startswith("Terminale Śrubowe"):
+                    group=('Terminals','Terminale')
+                else:
+                    group=None
+                target=submenus[group] if group in submenus else menu
+            elif index in {3,5,7,8}:
+                target = menu
             else:
-                group = secondary.get(item.id,subgroup(item))
                 if group not in submenus:
                     from app.ui.library_menu_style import LibrarySubMenu
                     submenus[group]=LibrarySubMenu(self.t(*group),menu)
                     menu.addMenu(submenus[group])
                 target = submenus[group]
-            action = target.addAction(self.t("Place on sheet", "Umieść na arkuszu") if index == 3 else item_name(item, self.settings.language))
+            action = target.addAction(item_name(item, self.settings.language))
             action.setData(item.id)
-            action.setProperty("secondaryEntry",item.id in secondary)
+            action.setProperty("secondaryEntry",is_secondary)
             from app.libraries.catalog_text import catalog_text
             action.setToolTip(catalog_text(item.variant,self.settings.language))
             # Pozycja jest przechwycona przed otwarciem menu. Przejście przez
             # podkategorie nie przesuwa miejsca wstawienia elementu.
-            action.triggered.connect(lambda checked=False, identity=item.id, pos=menu_pos: self.add_component_from_id(identity, global_pos=pos))
+            if index==5:
+                action.triggered.connect(lambda checked=False, identity=item.id,pos=menu_pos:self.add_favorite(identity,pos))
+            else:
+                action.triggered.connect(lambda checked=False, identity=item.id, pos=menu_pos: self.add_component_from_id(identity, global_pos=pos))
         if index == 3:
             menu.addSeparator()
             menu.addAction(self.custom_action)
 
     def add_component_from_id(self, library_id, name=None, global_pos=None):
         try:
+            from app.core.assets import load_assets, with_asset_dependencies
+            raw=next((d for d in self.project.custom_components if d["id"]==library_id),None)
+            if library_id.startswith("asset_") and raw is None:
+                raw=next((d for d in load_assets() if d["id"]==library_id),None)
+                if raw: self.project.custom_components=with_asset_dependencies(self.project.custom_components+[raw])
+            if raw and "asset" in raw and not raw["asset"]["boxed"]:
+                return self.place_asset(raw,global_pos)
             component = self._current_view().add_component(library_id, global_pos=global_pos)
             default_name = self.settings.default_display_names.get(library_id, "").strip()
             if default_name:
@@ -395,6 +465,41 @@ class MainWindow(QMainWindow):
             return component
         except ValueError as error:
             self._error(str(error))
+
+    def toggle_favorite(self):
+        c=self._selected_component
+        if c is None: return
+        favorites=deepcopy(self.settings.favorite_components)
+        if c.library_id in favorites:
+            del favorites[c.library_id]
+            message=self.t("Removed from favorites", "Usunięto z Ulubionych")
+        else:
+            props={k:v for k,v in c.properties.items() if k not in {"asset_group","usb_a_target","usb_b_target"} and not any(word in k for word in ("source","firmware","code_folder","usb_a_x","usb_a_y","usb_b_x","usb_b_y"))}
+            favorites[c.library_id]={"value":c.value,"unit":c.unit,"display_name":c.display_name,"show_name":c.show_name,"show_value":c.show_value,"properties":props}
+            message=self.t("Added to favorites", "Dodano do Ulubionych")
+        previous=self.settings.favorite_components; self.settings.favorite_components=favorites
+        try: save_settings(self.settings)
+        except (OSError,ValueError) as error:
+            self.settings.favorite_components=previous; self._error(str(error)); return
+        self.statusBar().showMessage(message,3000)
+
+    def remove_favorite(self,identity):
+        previous=deepcopy(self.settings.favorite_components)
+        self.settings.favorite_components.pop(identity,None)
+        try: save_settings(self.settings)
+        except (OSError,ValueError) as error:
+            self.settings.favorite_components=previous; self._error(str(error)); return False
+        self.statusBar().showMessage(self.t('Removed from favorites','Usunięto z Ulubionych'),3000)
+        return True
+
+    def add_favorite(self,identity,pos=None):
+        values=self.settings.favorite_components.get(identity,{})
+        c=self.add_component_from_id(identity,global_pos=pos)
+        if c is None: return
+        for key in ("value","unit","display_name","show_name","show_value","properties"):
+            if key in values and isinstance(values[key],type(getattr(c,key))): setattr(c,key,deepcopy(values[key]))
+        self._current_view().refresh_component(c.id); self.record_history()
+        return c
 
     def add_sheet(self):
         current = self.project.sheets[self.tabs.currentIndex()]
@@ -458,6 +563,7 @@ class MainWindow(QMainWindow):
             return
         if self.ai_panel:
             self.ai_panel.new_chat()
+        if getattr(self, "command_panel", None): self.command_panel.reset()
         self.project = Project(name=dialog.name.text().strip() or self.t("New project", "Nowy projekt"),
                                sheets=[Sheet(name=self.t("Sheet 1", "Arkusz 1"),
                                              paper_size=dialog.paper.currentText(),
@@ -483,6 +589,7 @@ class MainWindow(QMainWindow):
         self.project = candidate
         if self.ai_panel:
             self.ai_panel.new_chat()
+        if getattr(self, "command_panel", None): self.command_panel.reset()
         self.current_file = Path(filename)
         self._rebuild_tabs(selected=0)
         self._reset_history()
@@ -540,6 +647,7 @@ class MainWindow(QMainWindow):
                 self.simulation_window.close()
             if self.ai_panel:
                 self.ai_panel.cancel()
+            if getattr(self, "command_panel", None): self.command_panel.cancel_request()
             event.accept()
         else:
             event.ignore()
@@ -570,6 +678,8 @@ class MainWindow(QMainWindow):
     def show_component_properties(self, component):
         if component is None:
             return
+        if component.properties.get('_asset_properties_editable')=='false':
+            self._error(self.t('This Asset member is locked. Enable property editing in the Asset case editor.','Ten element Assetu jest zablokowany. Włącz edycję właściwości w edytorze obudowy Assetu.')); return
         definition = get_definition(component.library_id, self.project.custom_components)
         dialog = ComponentPropertiesDialog(component, definition, self.settings.language, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -579,8 +689,9 @@ class MainWindow(QMainWindow):
         extra_value = values.pop("extra_value", "")
         extra_show = values.pop("extra_show", False)
         component.properties.update(values.pop("simulation_properties", {}))
+        from app.core.editor_operations import set_property
         for key, value in values.items():
-            setattr(component, key, value)
+            set_property(component, key, value)
         if extra_key:
             if extra_value:
                 component.properties[extra_key] = extra_value
@@ -692,6 +803,10 @@ class MainWindow(QMainWindow):
             self._error(str(error))
             return
         self.settings = candidate
+        if getattr(self, "command_panel", None):
+            self.command_panel.cancel_request()
+            self.command_panel.translate()
+            self.command_dock.setWindowTitle(self.t("AI assistant", "Asystent AI"))
         from app.ui.theme import apply_theme
         apply_theme(self,self.settings)
         from app.ui.window_mode import show_window
@@ -727,38 +842,135 @@ class MainWindow(QMainWindow):
         self.record_history()
         self.add_component_from_id(dialog.definition["id"])
 
+    def save_as_asset(self):
+        self._sync_positions()
+        view=self._current_view()
+        selected={item.data(1) for item in view.scene.selectedItems() if item.data(0)=="component"}
+        if not selected:
+            self._error(self.t('Select components to save as an Asset first.','Najpierw zaznacz elementy, które mają trafić do assetu.')); return
+        name,ok=QInputDialog.getText(self,self.t("Save circuit as Asset","Zapisz układ jako Asset"),self.t("Asset name","Nazwa assetu"))
+        if not ok or not name.strip(): return
+        boxed=QMessageBox.question(self,self.t("Asset case","Obudowa assetu"),self.t(
+            "Design a case around the selected circuit? No keeps its original form.",
+            "Zaprojektować obudowę zaznaczonego układu? Nie zachowuje jego oryginalną postać."),
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No|QMessageBox.StandardButton.Cancel,QMessageBox.StandardButton.No)
+        if boxed==QMessageBox.StandardButton.Cancel: return
+        grouped=True
+        if boxed==QMessageBox.StandardButton.No:
+            choice=QMessageBox.question(self,self.t('Asset behavior','Zachowanie assetu'),self.t(
+                'Move, rotate and select the asset contents together? Choose No for independent components. Shift temporarily selects individual components.',
+                'Czy przesuwać, obracać i zaznaczać zawartość jako całość? Nie oznacza osobne elementy. Shift tymczasowo przełącza na wybór pojedynczych elementów.'),
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No|QMessageBox.StandardButton.Cancel,QMessageBox.StandardButton.Yes)
+            if choice==QMessageBox.StandardButton.Cancel: return
+            grouped=choice==QMessageBox.StandardButton.Yes
+        try:
+            from app.core.assets import make_asset,save_asset
+            definition=make_asset(self.project,self.project.sheets[self.tabs.currentIndex()],name,boxed==QMessageBox.StandardButton.Yes,selected,grouped)
+            if boxed==QMessageBox.StandardButton.Yes:
+                from app.ui.paint_case_editor import PaintAssetCaseEditor as AssetCaseEditor
+                dialog=AssetCaseEditor(definition,self.settings,self)
+                if dialog.exec()!=QDialog.DialogCode.Accepted: return
+                definition=dialog.definition
+            save_asset(definition)
+            self.project.custom_components.append(definition); self.record_history()
+            self.statusBar().showMessage(self.t("Asset saved in the Custom library.","Asset zapisany w bibliotece Customowe elementy."),8000)
+        except (ValueError,OSError) as error: self._error(str(error))
+
+    def place_asset(self,definition,global_pos=None):
+        from app.core.assets import instantiate, with_asset_dependencies
+        from app.core.models import ComponentInstance
+        from app.canvas.component_item import ComponentItem
+        from app.canvas.page import fit_component_position
+        from PySide6.QtCore import QPointF,QRectF
+        from PySide6.QtGui import QTransform
+        view=self._current_view(); index=self.tabs.currentIndex()
+        staged=Project.from_dict(deepcopy(self.project.to_dict())); staged.custom_components=with_asset_dependencies(staged.custom_components)
+        instance=ComponentInstance(definition["id"],0,0)
+        content,_=instantiate(definition["asset"],instance,staged)
+        bounds=QRectF()
+        for c in content.components:
+            d=get_definition(c.library_id,staged.custom_components)
+            bounds=bounds.united(QTransform().rotate(c.rotation).mapRect(ComponentItem.selection_rect(d)).translated(c.x,c.y))
+        point=view._snap(view.mapToScene(view.mapFromGlobal(global_pos or QCursor.pos())))
+        point=fit_component_position(staged.sheets[index],bounds,point)
+        if point is None: raise ValueError(self.t("Asset does not fit this sheet.","Asset nie mieści się na arkuszu."))
+        # Instantiate again at the fitted position in a fresh staging copy so
+        # failed insertion never consumes references or touches the document.
+        staged=Project.from_dict(deepcopy(self.project.to_dict())); staged.custom_components=with_asset_dependencies(staged.custom_components)
+        instance.x,instance.y=point.x(),point.y(); content,_=instantiate(definition["asset"],instance,staged)
+        staged.sheets[index].components.extend(content.components); staged.sheets[index].wires.extend(content.wires); staged.sheets[index].comments.extend(content.comments)
+        self.project=Project.from_dict(staged.to_dict()); self._rebuild_tabs(selected=index); self.record_history()
+        return content.components[0]
+
     def edit_custom_component(self, library_id):
         from app.core.custom_library import replace_custom
         definition = next((entry for entry in self.project.custom_components if entry["id"] == library_id), None)
+        if definition is None and library_id.startswith("asset_"):
+            from app.core.assets import load_assets,with_asset_dependencies
+            definition=next((d for d in load_assets() if d["id"]==library_id),None)
         if definition is None:
             return
-        dialog = CustomComponentDialog(self.settings.language, self, definition=definition)
+        if 'asset' in definition:
+            from app.ui.paint_case_editor import PaintAssetCaseEditor as AssetCaseEditor
+            dialog=AssetCaseEditor(definition,self.settings,self)
+        else: dialog = CustomComponentDialog(self.settings.language, self, definition=definition)
         if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.definition:
             return
         self._sync_positions()
-        replace_custom(self.project, dialog.definition)
+        try:
+            if "asset" in definition:
+                in_use=any(c.library_id==library_id for s in self.project.sheets for c in s.components)
+                if in_use:
+                    from app.core.custom_library import existing_asset_pins_preserved
+                    current=next((d for d in self.project.custom_components if d["id"]==library_id),definition)
+                    if not existing_asset_pins_preserved(current,dialog.definition):
+                        raise ValueError(self.t(
+                            "When an asset is already used on a sheet, existing pins must keep their number, identity and position. You may append new pins.",
+                            "Gdy asset jest już używany na schemacie, istniejące piny muszą zachować numer, tożsamość i położenie. Możesz dopisywać nowe piny na końcu."))
+                from app.core.assets import save_asset
+                save_asset(dialog.definition)
+            if not any(d["id"]==library_id for d in self.project.custom_components):
+                from app.core.assets import with_asset_dependencies
+                self.project.custom_components=with_asset_dependencies(self.project.custom_components+[definition])
+            replace_custom(self.project, dialog.definition)
+        except (ValueError,OSError) as error:
+            self._error(str(error)); return
         self._rebuild_tabs()
         self.record_history()
 
     def delete_custom_component(self, library_id):
         from app.core.custom_library import remove_custom
         definition = next((entry for entry in self.project.custom_components if entry["id"] == library_id), None)
+        global_asset=None
+        if library_id.startswith("asset_"):
+            from app.core.assets import load_assets
+            try: global_asset=next((d for d in load_assets() if d["id"]==library_id),None)
+            except (ValueError,OSError) as error: self._error(str(error)); return
+            definition=definition or global_asset
         if definition is None:
             return
         count = sum(component.library_id == library_id for sheet in self.project.sheets for component in sheet.components)
         message = self.t(
             f'Delete "{definition["name"]}" from the library and its {count} instances on all sheets? Wires remain with disconnected ends. Ctrl+Z restores the deletion.',
             f'Usunąć „{definition["name"]}” z biblioteki i wszystkie jego kopie ({count}) na arkuszach? Przewody pozostaną z odłączonymi końcami. Ctrl+Z przywraca usunięcie.')
+        if global_asset:
+            message += self.t(" The reusable asset will also be removed from the shared library. Undo restores this project only; other saved ELS files retain their embedded definition.",
+                " Asset zostanie też usunięty ze wspólnej biblioteki. Cofnij przywraca tylko ten projekt; inne zapisane pliki ELS zachowują własną definicję.")
         if QMessageBox.question(self, self.t("Delete custom component", "Usuń własny element"), message,
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         self._sync_positions()
+        if global_asset:
+            from app.core.assets import remove_asset
+            try: remove_asset(library_id)
+            except (ValueError,OSError) as error: self._error(str(error)); return
         remove_custom(self.project, library_id)
         self._rebuild_tabs()
         self.record_history()
 
     def _ai_context(self):
+        from app.libraries.simulation_catalog import behavior_for
         # Przekazujemy tylko bieżący arkusz i dane biblioteki. Ustawienia,
         # ścieżki plików oraz sekret API nie są częścią kontekstu modelu.
         sheet = self.project.sheets[self.tabs.currentIndex()]
@@ -779,6 +991,8 @@ class MainWindow(QMainWindow):
             "forbidden_title_block_scene": list(title_block_rect(sheet).getRect()),
             "library": [
                 {"id": item.id, "name": item_name(item, self.settings.language),
+                 "symbol": item.symbol, "default_unit": item.default_unit,
+                 "editable_parameters": [asdict(p) for p in behavior_for(item).parameters] if behavior_for(item) else [],
                  "width": item.width, "height": item.height, "variant": item.variant,
                  "verified": item.verified, "pins": [
                      {"index": index, "number": pin.number, "name": pin.name, "x": pin.x, "y": pin.y}
@@ -807,6 +1021,10 @@ class MainWindow(QMainWindow):
 
     def show_ai(self, *, documentation=False):
         if not AI_AVAILABLE:
+            return
+        if not documentation:
+            if self.settings.ai_provider == "none": return
+            self.show_command_panel()
             return
         # Integracja wycofana w rc14: brak importu i inicjalizacji klienta
         # sieciowego podczas normalnego uruchamiania edytora.
@@ -852,6 +1070,21 @@ class MainWindow(QMainWindow):
             context = {"library": context["library"], "grid_step": 20}
         dialog = AiDialog(self.settings, context, apply, self, documentation=documentation)
         dialog.exec()
+
+    def show_command_panel(self, terminal=False):
+        from app.ui.command_panel import CommandPanel
+        panel = getattr(self, "command_panel", None)
+        if panel is None:
+            panel = CommandPanel(self)
+            self.command_panel = panel
+            self.command_dock = QDockWidget(self.t("AI assistant", "Asystent AI"), self)
+            self.command_dock.setObjectName("commandDock")
+            self.command_dock.setWidget(panel)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.command_dock)
+            self.resizeDocks([self.command_dock], [460], Qt.Orientation.Horizontal)
+        panel.tabs.setCurrentIndex(1 if terminal else 0)
+        self.command_dock.show(); self.command_dock.raise_()
+        panel.update_context_label()
 
     def show_simulation(self):
         from app.ui.simulation_window import SimulationWindow
@@ -964,8 +1197,11 @@ class MainWindow(QMainWindow):
             results.clear()
             for d in AVAILABLE_ITEMS:
                 label = item_name(d, self.settings.language)
-                if text.casefold() in label.casefold():
-                    results.addItem(label)
+                primary=next((self.t(en,pl) for en,pl,_,categories in LIBRARY_GROUPS if d.category in categories),d.category)
+                group=self.t(*subgroup(d))
+                category=primary if primary==group else primary+" / "+group
+                if text.casefold() in (label+" "+category).casefold():
+                    results.addItem(label+"   ["+category+"]")
                     results.item(results.count()-1).setData(Qt.ItemDataRole.UserRole, d.id)
         def place(item):
             identity = item.data(Qt.ItemDataRole.UserRole)
@@ -1004,6 +1240,9 @@ class MainWindow(QMainWindow):
 
     def show_component_info(self):
         selected = self._current_view().scene.selectedItems()
+        view=self._current_view(); point=view.mapToScene(view.mapFromGlobal(QCursor.pos()))
+        hovered=next((item for item in view.scene.items(point) if item.data(0)=='component'),None)
+        if hovered is not None: selected=[hovered]
         if len(selected) != 1:
             self.statusBar().showMessage(self.t("Select one object and press H.", "Zaznacz jeden obiekt i naciśnij H."), 3000)
             return

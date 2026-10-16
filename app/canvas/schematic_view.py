@@ -4,11 +4,11 @@ Silne referencje trzymamy dla wszystkich obiektów Qt. Przewody wiążemy z
 konkretnym pinem i węzłem, nie z nazwą ani boundingRect komponentu.
 """
 from __future__ import annotations
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import replace
 from math import ceil, floor
 from PySide6.QtCore import QByteArray, QMimeData, QLineF, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QCursor, QFont
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QCursor, QFont, QTransform
 from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGraphicsRectItem
 from app.core.models import Annotation, ComponentInstance, Project, Sheet, Wire, new_id
 from app.canvas.component_item import ComponentItem
@@ -65,8 +65,8 @@ class WireItem(QGraphicsPathItem):
         painter.drawPath(self.path())
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(getattr(self,"ink_color","#167d3d")))
-        for point in (self.points[0], self.points[-1]):
-            painter.drawEllipse(point, 3, 3)
+        for show,point in zip(getattr(self,"endpoint_dots",(True,True)),(self.points[0], self.points[-1])):
+            if show: painter.drawEllipse(point, 3, 3)
         painter.restore()
 
 class SchematicView(QGraphicsView):
@@ -78,13 +78,17 @@ class SchematicView(QGraphicsView):
         self.scene = PaperScene(self)
         self.setScene(self.scene)
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self._component_items, self._wire_items, self._comment_items = {}, {}, {}
         self.tool = "select"
+        self._show_hidden_wires=False
         self._wire_start = self._wire_preview = self._dragged_wire_end = None
+        self._wire_press_scene = None
+        self._wire_press_from_anchor = False
+        self._wire_drag_moved = False
         self._annotation_editor = None
         self._title_editor = None
         self._title_field = None
@@ -101,6 +105,11 @@ class SchematicView(QGraphicsView):
         self._auto_fit = True
         self._refreshing = False
         self._loading = False
+        self._fit_scheduled = False
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(80)
+        self._fit_timer.timeout.connect(self._run_scheduled_fit)
         self.scene.selectionChanged.connect(self._selection_changed)
         self.set_tool("select")
         if sheet:
@@ -123,15 +132,35 @@ class SchematicView(QGraphicsView):
         super().showEvent(event)
         if not self._page_fitted:
             self._page_fitted = True
-            QTimer.singleShot(0, self.fit_page)
+            self._schedule_fit_page()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self._auto_fit and not self._fitting:
-            QTimer.singleShot(0, self.fit_page)
+            self._schedule_fit_page()
+
+    def _schedule_fit_page(self):
+        if self._fit_scheduled:
+            self._fit_timer.start()
+            return
+        self._fit_scheduled = True
+        self._fit_timer.start()
+
+    def _run_scheduled_fit(self):
+        self._fit_scheduled = False
+        self.fit_page()
 
     def fit_page(self):
+        from shiboken6 import isValid
+        if not isValid(self): return
         if self._fitting:
+            return
+        window = self.window()
+        if window is not None and window.isMinimized():
+            return
+        # Minimize/restore can temporarily give a child view an empty viewport.
+        # Avoid fitting to a zero-sized target and let the next real resize fit.
+        if self.viewport().width() <= 0 or self.viewport().height() <= 0:
             return
         self._fitting = True
         self.resetTransform()
@@ -192,6 +221,7 @@ class SchematicView(QGraphicsView):
         self._dragged_wire_end = None
         self._group_drag = None
         self.scene.blockSignals(True)
+        self.cable_layer=None
         self.scene.clear()
         self._component_items.clear()
         self._wire_items.clear()
@@ -204,12 +234,19 @@ class SchematicView(QGraphicsView):
             self._add_component_item(component)
         for wire in sheet.wires:
             self._add_wire_item(wire)
+        # Older documents and newly drawn branches can have a free endpoint
+        # touching the interior of another path. Canonicalize those T/Y joins
+        # before history is recorded; otherwise redo would mutate the drawing
+        # again every time the canvas is rebuilt.
+        self._normalize_wire_junctions()
         for comment in sheet.comments:
             self._add_comment_item(comment)
         self._join_coincident_ends()
         self._refresh_attached_wires()
         self.scene.blockSignals(False)
         self._loading = False
+        from app.ui.usb_cable import EditorCables
+        self.cable_layer=EditorCables(self)
         self.viewport().update()
 
     def _add_component_item(self, component):
@@ -225,8 +262,31 @@ class SchematicView(QGraphicsView):
     def refresh_component(self, component_id):
         item = self._component_items.get(component_id)
         if item:
-            item.update_labels()
-            item.update()
+            from app.libraries.built_in import get_instance_definition
+            definition=get_instance_definition(item.component,self.project.custom_components if self.project else None)
+            if definition==item.definition:
+                # Ordinary value/name edits must retain the original hit area.
+                item.update_labels()
+            else:
+                # Pin count/geometry can depend on properties (multi-position switch).
+                selected=item.isSelected(); component=item.component
+                numbers={pin.number for pin in definition.pins} if definition else set()
+                for wire,side in self._ends():
+                    if getattr(wire,side+'_component_id')!=component_id: continue
+                    index=getattr(wire,side+'_pin_index')
+                    number=getattr(wire,side+'_pin_number')
+                    if number is None and index is not None and 0<=index<len(item.definition.pins):
+                        number=item.definition.pins[index].number
+                    if str(number) not in numbers:
+                        # A removed switch throw becomes a free cable end;
+                        # keep the cable, never leave an invalid pin anchor.
+                        for key in ('component_id','pin_index','pin_number'):
+                            setattr(wire,side+'_'+key,None)
+                self.scene.removeItem(item)
+                self._add_component_item(component)
+                self._component_items[component_id].setSelected(selected)
+            if getattr(self,'cable_layer',None): self.cable_layer.refresh(component_id)
+            self._refresh_attached_wires()
         self.viewport().update()
 
     def add_component(self, library_id, global_pos=None):
@@ -252,13 +312,17 @@ class SchematicView(QGraphicsView):
         if point is None:
             raise ValueError("Component does not fit this sheet; choose a larger paper size. / Element nie mieści się na arkuszu; wybierz większy format.")
         project = self.project or Project(sheets=[self._sheet])
-        component = project.new_component(library_id, point.x(), point.y())
-        apply_defaults(component,self.settings)
-        self._sheet.components.append(component)
+        from app.core.editor_operations import add_component
+        component = add_component(project, self._sheet, library_id, point.x(), point.y(), self.settings)
         self._add_component_item(component)
+        from app.ui.usb_cable import CABLE_IDS,UsbCable
+        if component.library_id in CABLE_IDS and hasattr(self,'cable_layer'):
+            self._component_items[component.id].hide(); self.cable_layer.usb_cables.append(UsbCable(self.cable_layer,component))
         self._attach_free_wire_ends_to_component_pins()
         self.scene.clearSelection()
-        self._component_items[component.id].setSelected(True)
+        if component.library_id in CABLE_IDS and getattr(self,'cable_layer',None):
+            next(c for c in self.cable_layer.usb_cables if c.component.id==component.id).path.setSelected(True)
+        else: self._component_items[component.id].setSelected(True)
         self._changed()
         return component
 
@@ -286,11 +350,8 @@ class SchematicView(QGraphicsView):
 
     @staticmethod
     def _route_45_degrees(start, end):
-        dx, dy = end.x()-start.x(), end.y()-start.y()
-        if abs(dx) < .001 or abs(dy) < .001 or abs(abs(dx)-abs(dy)) < .001:
-            return [start, end]
-        middle = QPointF(start.x()+(abs(dy) if dx > 0 else -abs(dy)), end.y()) if abs(dx) > abs(dy) else QPointF(end.x(), start.y()+(abs(dx) if dy > 0 else -abs(dx)))
-        return [start, middle, end]
+        from app.canvas.routing import diagonal_route
+        return diagonal_route(start,end)
 
     def _route_in_drawing_area(self, start, end):
         """W obszarze L wybieramy legalną trasę, nadal wyłącznie co 45°."""
@@ -314,11 +375,21 @@ class SchematicView(QGraphicsView):
     def _end_point(wire, side):
         return QPointF(getattr(wire, side+"_x"), getattr(wire, side+"_y"))
 
+    def _wire_pin_candidates(self):
+        from app.simulation.jumper import CABLE_IDS
+        targets=[]
+        for item in self._component_items.values():
+            if item.definition.symbol=='breadboard': continue
+            if item.component.library_id in CABLE_IDS or item.definition.name in {'Kostka zasilająca USB','Klawiatura USB'}: continue
+            for index,pin in enumerate(item.pin_positions()):
+                if item.definition.symbol=='goldpin' and index==0: continue
+                targets.append((pin,item.component.id,index))
+        return targets
+
     def _snap_to_pin(self, point, exclude_wire=None):
         # Promień mniejszy od połowy odstępu pinów: sąsiedni pin nie zostanie
         # przypadkowo przejęty. Nie przyciągamy końca do jego poprzedniej pozycji.
-        targets = [(pin, item.component.id, index) for item in self._component_items.values()
-                   for index, pin in enumerate(item.pin_positions())]
+        targets = self._wire_pin_candidates()
         excluded_junction = None
         if exclude_wire and self._dragged_wire_end:
             wire = next((w for w in self._sheet.wires if w.id == exclude_wire), None)
@@ -363,7 +434,7 @@ class SchematicView(QGraphicsView):
                 continue
             tail = Wire(point.x(), point.y(), wire.end_x, wire.end_y,
                         end_component_id=wire.end_component_id, end_pin_index=wire.end_pin_index,
-                        end_pin_number=wire.end_pin_number, end_junction_id=wire.end_junction_id)
+                        end_pin_number=wire.end_pin_number, end_junction_id=wire.end_junction_id,group_id=wire.group_id)
             before, after = vertices[:segment+1]+[point], [point]+vertices[segment+1:]
             # Jeżeli węzeł trafił dokładnie w zakręt, usuń jego powtórzenie.
             before = [p for i,p in enumerate(before) if i == 0 or p != before[i-1]]
@@ -374,6 +445,32 @@ class SchematicView(QGraphicsView):
             tail.points = [[p.x(),p.y()] for p in after]
             self._sheet.wires.append(tail)
             self._add_wire_item(tail)
+
+    def _normalize_wire_junctions(self):
+        """Split paths at free endpoints that touch their interiors.
+
+        Work from a snapshot of endpoint coordinates: splitting adds only
+        endpoints at the junction already being processed, so a second pass
+        is unnecessary. Plain segment crossings remain unconnected.
+        """
+        ends={(self._end_point(w,side).x(),self._end_point(w,side).y())
+              for w in self._sheet.wires for side in ("start","end")
+              if not getattr(w,side+"_component_id")}
+        for x,y in ends:
+            self._split_wires_at_point(QPointF(x,y))
+
+    def _merge_wire_overlaps(self, seeds):
+        from app.core.wire_topology import merge_overlaps
+        if not merge_overlaps(self._sheet, seeds):
+            return False
+        for item in self._wire_items.values():
+            self.scene.removeItem(item)
+        self._wire_items.clear()
+        for wire in self._sheet.wires:
+            self._add_wire_item(wire)
+        self._join_coincident_ends()
+        self._refresh_attached_wires()
+        return True
 
     def _join_coincident_ends(self):
         groups = {}
@@ -391,12 +488,74 @@ class SchematicView(QGraphicsView):
                     setattr(w, s+"_junction_id", junction)
             for w, s in ends:
                 setattr(w, s+"_junction_id", junction)
+        for wire in self._sheet.wires:
+            item=self._wire_items.get(wire.id)
+            if item:
+                flags=[]
+                for side in ("start","end"):
+                    point=self._end_point(wire,side); ends=groups.get((round(point.x(),4),round(point.y(),4)),[])
+                    directions=[]
+                    for w,s in ends:
+                        vertices=w.points or [[w.start_x,w.start_y],[w.end_x,w.end_y]]
+                        # Malformed/legacy zero-length wires can contain only
+                        # one vertex. They have no outgoing direction, but must
+                        # not abort a mouse-release handler for the whole sheet.
+                        if len(vertices)<2:
+                            continue
+                        neighbour=QPointF(*(vertices[1] if s=="start" else vertices[-2]))
+                        delta=neighbour-point
+                        if delta.manhattanLength()>.001:
+                            length=(delta.x()**2+delta.y()**2)**.5
+                            unit=(round(delta.x()/length,5),round(delta.y()/length,5))
+                            if unit not in directions: directions.append(unit)
+                    # Show branch nodes and genuinely floating wire ends.
+                    # A shared two-direction bend or a component-pin endpoint
+                    # is connected already and therefore needs no endpoint dot.
+                    floating_end = len(ends)==1 and not getattr(wire,side+"_component_id")
+                    flags.append(len(directions)>=3 or floating_end)
+                item.endpoint_dots=tuple(flags); item.update()
 
-    def _refresh_attached_wires(self):
+    def _routes_after_movement(self, wires, wire_ids):
+        """Return the shortest legal routes for moved wires against the new layout."""
+        if not wire_ids:
+            return {}
+        from app.canvas.routing import safe_route
+
+        routing_sheet = copy(self._sheet)
+        routing_sheet.wires = deepcopy(wires)
+        routing_by_id = {wire.id: wire for wire in routing_sheet.wires}
+        # During a drag, always route against the geometry captured at press
+        # time, not the previous mouse frame's just-rerouted paths. This keeps
+        # junction branches from chasing each other and leaving tiny elbows.
+        gesture_points = getattr(self, "_wire_gesture_points", {})
+        for candidate in routing_sheet.wires:
+            original = gesture_points.get(candidate.id)
+            if original:
+                candidate.points = deepcopy(original)
+        moving_ids = set(wire_ids)
+        routes = {}
+        for wire_id in sorted(moving_ids):
+            wire = routing_by_id.get(wire_id)
+            if wire is None:
+                continue
+            junctions = {getattr(wire, side+"_junction_id") for side in ("start", "end")}
+            junctions.discard(None)
+            related = {other.id for other in routing_sheet.wires
+                       if other.id in moving_ids and other.id != wire.id and
+                       junctions.intersection(getattr(other, side+"_junction_id")
+                                              for side in ("start", "end"))}
+            route = safe_route(routing_sheet, self._end_point(wire, "start"),
+                               self._end_point(wire, "end"), exclude=(wire.id, *related))
+            if route:
+                routes[wire.id] = route
+        return routes
+
+    def _refresh_attached_wires(self, force_reroute=False):
         if not self._sheet or self._refreshing:
             return
         self._refreshing = True
         try:
+            if getattr(self,'cable_layer',None): self.cable_layer.follow_targets()
             anchors = {}
             for wire, side in self._ends():
                 comp_id, pin = getattr(wire, side+"_component_id"), getattr(wire, side+"_pin_index")
@@ -417,11 +576,36 @@ class SchematicView(QGraphicsView):
                     p = anchors[junction]
                     setattr(wire, side+"_x", p.x())
                     setattr(wire, side+"_y", p.y())
+            forced_ids = (set(wire.id for wire in self._sheet.wires) if force_reroute is True
+                          else set(force_reroute or ()))
+            reroute_ids = set(forced_ids)
+            baselines = {}
             for wire in self._sheet.wires:
                 start, end = self._end_point(wire, "start"), self._end_point(wire, "end")
-                unchanged = (len(wire.points) >= 2 and QPointF(*wire.points[0]) == start and QPointF(*wire.points[-1]) == end)
-                route = ([QPointF(*p) for p in wire.points] if unchanged else
-                         self._route_in_drawing_area(start, end) or self._route_45_degrees(start, end))
+                baseline = getattr(self, "_wire_gesture_points", {}).get(wire.id, wire.points)
+                baselines[wire.id] = baseline
+                endpoints_unchanged = (len(baseline) >= 2 and
+                                       QPointF(*baseline[0]) == start and QPointF(*baseline[-1]) == end)
+                if not endpoints_unchanged or not baseline:
+                    reroute_ids.add(wire.id)
+
+            shortest_routes = self._routes_after_movement(self._sheet.wires, reroute_ids)
+            from app.canvas.wire_geometry import stretch, compact_route
+            for wire in self._sheet.wires:
+                start, end = self._end_point(wire, "start"), self._end_point(wire, "end")
+                baseline = baselines[wire.id]
+                if wire.id not in reroute_ids:
+                    route = compact_route([QPointF(*point) for point in baseline])
+                else:
+                    route = shortest_routes.get(wire.id)
+                if wire.id in reroute_ids and route is None:
+                    # If overlap constraints make a legal shortest route impossible,
+                    # keep the existing cable connected and within the drawing area.
+                    route = stretch(baseline, start, end)
+                    if not route_allowed(self._sheet, route):
+                        route = self._route_in_drawing_area(start, end) or self._route_45_degrees(start, end)
+                else:
+                    route = compact_route(route)
                 wire.points = [[p.x(), p.y()] for p in route]
                 if wire.id in self._wire_items:
                     self._wire_items[wire.id].set_points(route)
@@ -431,7 +615,7 @@ class SchematicView(QGraphicsView):
     def _attach_end_if_near_pin(self, wire, is_start):
         side = "start" if is_start else "end"
         point = self._end_point(wire, side)
-        candidates = [(pin, item.component.id, index) for item in self._component_items.values() for index, pin in enumerate(item.pin_positions())]
+        candidates = self._wire_pin_candidates()
         if candidates:
             pin, comp, index = min(candidates, key=lambda t: QLineF(point, t[0]).length())
             if QLineF(point, pin).length() <= 6:
@@ -440,11 +624,11 @@ class SchematicView(QGraphicsView):
                 setattr(wire, side+"_x", pin.x())
                 setattr(wire, side+"_y", pin.y())
 
-    def _attach_free_wire_ends_to_component_pins(self):
+    def _attach_free_wire_ends_to_component_pins(self,join=True):
         for wire, side in self._ends():
             if getattr(wire, side+"_component_id") is None:
                 self._attach_end_if_near_pin(wire, side == "start")
-        self._join_coincident_ends()
+        if join: self._join_coincident_ends()
         self._refresh_attached_wires()
 
     def _nearest_wire_endpoint(self, point):
@@ -455,6 +639,7 @@ class SchematicView(QGraphicsView):
         return (nearest[1], nearest[2]) if QLineF(point, nearest[0]).length() <= 6 else None
 
     def _move_wire_endpoint(self, wire_id, is_start, point, component_id, pin_index):
+        if any(QLineF(point,p).length()<8 for p,_,_,_ in self._jumper_contacts()): return
         wire = next((w for w in self._sheet.wires if w.id == wire_id), None)
         if wire is None:
             return
@@ -475,6 +660,14 @@ class SchematicView(QGraphicsView):
                 setattr(w, s+"_pin_index", pin_index)
                 setattr(w, s+"_pin_number", None)
         self._refresh_attached_wires()
+
+    def _jumper_contacts(self):
+        for cid,item in self._component_items.items():
+            d=item.definition
+            if d.symbol=='goldpin':
+                yield item.pin_positions()[0],cid,0,'female' if d.name=='Goldpin żeński' else 'male'
+            elif d.symbol=='breadboard':
+                for i,p in enumerate(item.pin_positions()): yield p,cid,i,'female'
 
     def mousePressEvent(self, event):
         point = self.mapToScene(event.position().toPoint())
@@ -502,6 +695,24 @@ class SchematicView(QGraphicsView):
             return
         if event.button() == Qt.MouseButton.LeftButton:
             if self.tool == "select":
+                if isinstance(item,ComponentItem):
+                    self._wire_gesture_points={w.id:deepcopy(w.points) for w in self._sheet.wires}
+                if item and hasattr(item,'cable'):
+                    super().mousePressEvent(event); return
+                if item:
+                    obj=item.component if item.data(0)=="component" else next((o for o in self._sheet.wires+self._sheet.comments if o.id==item.data(1)),None)
+                    group=obj.properties.get("asset_group") if isinstance(obj,ComponentInstance) else getattr(obj,"group_id",None)
+                    if group and not event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        ids={c.id for c in self._sheet.components if c.properties.get("asset_group")==group}
+                        ids.update(o.id for o in self._sheet.wires+self._sheet.comments if o.group_id==group)
+                        self.scene.clearSelection()
+                        for candidate in self.scene.items():
+                            if candidate.data(1) in ids: candidate.setSelected(True)
+                        self._begin_selection_group(point); self._group_drag["asset"]=True
+                        event.accept(); return
+                    if group and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        self.scene.clearSelection()
+                        item.setSelected(True)
                 # Grupę przesuwamy jednym wektorem, zanim Qt rozpocznie
                 # przeciąganie pojedynczego symbolu albo końcówki kabla.
                 if item and item.isSelected() and len(self.scene.selectedItems()) > 1:
@@ -510,38 +721,26 @@ class SchematicView(QGraphicsView):
                     return
                 endpoint = self._nearest_wire_endpoint(point)
                 if endpoint:
+                    self._wire_gesture_points={w.id:deepcopy(w.points) for w in self._sheet.wires}
                     self._dragged_wire_end = endpoint
                     event.accept()
                     return
             if self.tool == "wire" and drawing_contains(self._sheet, point):
+                if any(QLineF(point,p).length()<8 for p,_,_,_ in self._jumper_contacts()):
+                    self.setToolTip('Dodaj kabel z kategorii Kable i przesuń jego końcówkę na złącze.' if self.settings and self.settings.language=='pl' else 'Add a cable from Cables and drag its plug onto the connector.')
+                    event.accept(); return
                 snapped = self._snap_to_pin(point)
                 if not drawing_contains(self._sheet, snapped[0]):
                     event.accept()
                     return
                 if self._wire_start is None:
-                    self._wire_start = snapped
-                    self._wire_preview = QGraphicsPathItem(self._wire_path([snapped[0], snapped[0]]))
-                    self._wire_preview.setPen(QPen(QColor("#e76f51"), 2, Qt.PenStyle.DashLine))
-                    self.scene.addItem(self._wire_preview)
-                else:
-                    start, comp, pin = self._wire_start
-                    end, end_comp, end_pin = snapped
-                    if start != end:
-                        route = self._route_in_drawing_area(start, end)
-                        if route is None:
-                            event.accept()
-                            return
-                        wire = Wire(start.x(), start.y(), end.x(), end.y(), start_component_id=comp,
-                                    start_pin_index=pin, end_component_id=end_comp, end_pin_index=end_pin)
-                        wire.points = [[p.x(), p.y()] for p in route]
-                        self._sheet.wires.append(wire)
-                        self._add_wire_item(wire)
-                        self._split_wires_at_point(start, wire.id)
-                        self._split_wires_at_point(end, wire.id)
-                        self._join_coincident_ends()
-                        self._refresh_attached_wires()
-                        self._changed()
-                    self._clear_wire_preview()
+                    self._start_wire_preview(snapped)
+                # Defer completion until release. This gives click-click and
+                # drag-to-draw a single, unambiguous commit point and prevents
+                # Qt's default scene release handling from reusing the old start.
+                self._wire_press_scene = QPointF(snapped[0])
+                self._wire_press_from_anchor = snapped[0] == self._wire_start[0]
+                self._wire_drag_moved = False
                 event.accept()
                 return
             if self.tool == "delete":
@@ -557,6 +756,15 @@ class SchematicView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
+        if self.tool == "wire" and event.button() == Qt.MouseButton.LeftButton:
+            point = self.mapToScene(event.position().toPoint())
+            if drawing_contains(self._sheet, point):
+                snapped = self._snap_to_pin(point)
+                self._wire_press_scene = QPointF(snapped[0])
+                self._wire_press_from_anchor = snapped[0] == (self._wire_start[0] if self._wire_start else snapped[0])
+                self._wire_drag_moved = False
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             event.accept()
             return
@@ -612,20 +820,43 @@ class SchematicView(QGraphicsView):
             event.accept()
             return
         if self._wire_preview:
-            end, _, _ = self._snap_to_pin(self.mapToScene(event.position().toPoint()))
-            route = self._route_in_drawing_area(self._wire_start[0], end)
-            self._wire_preview.setPath(self._wire_path(route) if route else QPainterPath())
+            cursor=self.mapToScene(event.position().toPoint())
+            if self._wire_press_scene is not None and QLineF(cursor,self._wire_press_scene).length() >= 4:
+                self._wire_drag_moved=True
+            end, _, _ = self._snap_to_pin(cursor)
+            from app.canvas.routing import preview_route
+            route = preview_route(self._sheet,self._wire_start[0],end)
+            self._wire_preview.setPath(self._wire_path(route))
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self.tool == "wire" and event.button() == Qt.MouseButton.LeftButton:
+            if self._wire_press_scene is not None and self._wire_start:
+                dragged = self._wire_drag_moved
+                from_anchor = self._wire_press_from_anchor
+                self._wire_press_scene = None
+                self._wire_press_from_anchor = False
+                self._wire_drag_moved = False
+                if dragged or not from_anchor:
+                    point = self.mapToScene(event.position().toPoint())
+                    if drawing_contains(self._sheet, point):
+                        self._complete_wire_at(self._snap_to_pin(point))
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._group_drag is not None:
             moved = self._group_drag["delta"] != QPointF()
+            released_asset=bool(self._group_drag.get("asset"))
             origin = self._group_drag["origin"]
+            moved_ids = self._group_drag["ids"]
             self._group_drag = None
+            self._wire_gesture_points={}
             if moved:
-                self._attach_free_wire_ends_to_component_pins()
+                # Moving geometry is not an instruction to join unrelated nets.
+                self._attach_free_wire_ends_to_component_pins(join=False)
                 self._changed()
-            elif not event.modifiers():
+            elif not event.modifiers() and not released_asset:
                 # Sam klik nadal wybiera jeden obiekt, dopiero ruch myszy
                 # uruchamia przesunięcie całego wcześniejszego zaznaczenia.
                 item = self.scene.itemAt(origin, self.transform())
@@ -656,17 +887,20 @@ class SchematicView(QGraphicsView):
             wire_id, start = self._dragged_wire_end
             wire = next((w for w in self._sheet.wires if w.id == wire_id), None)
             if wire:
+                self._merge_wire_overlaps({wire.id})
                 self._split_wires_at_point(self._end_point(wire, "start" if start else "end"), wire.id)
             self._dragged_wire_end = None
             self._join_coincident_ends()
             self._refresh_attached_wires()
             self._changed()
+            self._wire_gesture_points={}
             event.accept()
             return
         super().mouseReleaseEvent(event)
         if self._sync_component_positions():
-            self._attach_free_wire_ends_to_component_pins()
+            self._attach_free_wire_ends_to_component_pins(join=False)
             self._changed()
+        self._wire_gesture_points={}
 
     def keyPressEvent(self, event):
         # QGraphicsTextItem nie jest QWidget: litery R/S/D i Delete muszą
@@ -674,19 +908,42 @@ class SchematicView(QGraphicsView):
         if self.is_editing_text():
             super().keyPressEvent(event)
             return
+        if event.key()==Qt.Key.Key_S and event.modifiers()==Qt.KeyboardModifier.ShiftModifier:
+            self._show_hidden_wires=True; self.viewport().update(); event.accept(); return
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
             self.delete_selected()
             return
-        if event.key() == Qt.Key.Key_R and not event.modifiers():
-            self.rotate_selected_components()
+        if event.key() == Qt.Key.Key_R and event.modifiers() in {Qt.KeyboardModifier.NoModifier,Qt.KeyboardModifier.ControlModifier}:
+            self.rotate_selected_components(opposite=bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier))
             return
         if event.key() == Qt.Key.Key_Escape:
             if self._group_drag is not None:
                 self._move_selection_group(QPointF())
                 self._group_drag = None
+            self._wire_gesture_points={}
             self._clear_wire_preview()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self,event):
+        if event.key() in (Qt.Key.Key_S,Qt.Key.Key_Shift) and not event.isAutoRepeat():
+            self._show_hidden_wires=False; self.viewport().update()
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self,event):
+        self._wire_gesture_points={}
+        # A minimize/alt-tab can steal focus mid-gesture. Keep the current
+        # free endpoint, but discard the stale press so restore cannot commit
+        # a phantom segment from an earlier mouse-down.
+        self._wire_press_scene=None
+        self._wire_press_from_anchor=False
+        self._wire_drag_moved=False
+        self._show_hidden_wires=False; self.viewport().update(); super().focusOutEvent(event)
+
+    def drawForeground(self,painter,rect):
+        if not (self._show_hidden_wires or getattr(self.settings,'wires_through_cases',False)): return
+        from app.canvas.wire_peek import draw
+        draw(painter,self._component_items.values(),self._wire_items.values(),canvas_colors(self.settings)['wire'])
 
     def is_editing_text(self):
         return self._title_editor is not None or self._annotation_editor is not None
@@ -790,6 +1047,8 @@ class SchematicView(QGraphicsView):
 
     def _begin_selection_group(self, origin):
         selected = self.scene.selectedItems()
+        bodies={i.data(1):self._component_items[i.data(1)] for i in selected if i.data(0)=='component' and i.data(1) in self._component_items}
+        selected=list(bodies.values())+[i for i in selected if i.data(0)!='component']
         self._group_drag = {
             "origin": origin, "delta": QPointF(),
             "ids": {i.data(1) for i in selected},
@@ -829,6 +1088,7 @@ class SchematicView(QGraphicsView):
                     elif comp in ids or wire.id in ids:
                         moving_junctions.add(junction)
         moving_junctions -= fixed_junctions
+        moved_wire_ids = set()
         for wire in wires:
             moved = []
             for side in ("start", "end"):
@@ -843,12 +1103,20 @@ class SchematicView(QGraphicsView):
             if all(moved) and wire.points:
                 route = [QPointF(x, y) + delta for x, y in wire.points]
             elif any(moved):
-                route = self._route_in_drawing_area(self._end_point(wire, "start"), self._end_point(wire, "end"))
+                from app.canvas.wire_geometry import stretch
+                route = stretch(wire.points,self._end_point(wire,"start"),self._end_point(wire,"end"))
             else:
                 continue
-            if not route or not route_allowed(self._sheet, route):
+            if not route:
                 return False
             wire.points = [[p.x(), p.y()] for p in route]
+            moved_wire_ids.add(wire.id)
+        shortest_routes = self._routes_after_movement(wires, moved_wire_ids)
+        if moved_wire_ids - shortest_routes.keys():
+            return False
+        for wire in wires:
+            if wire.id in shortest_routes:
+                wire.points = [[p.x(), p.y()] for p in shortest_routes[wire.id]]
         self._refreshing = True
         try:
             for item, original in group["items"]:
@@ -869,13 +1137,18 @@ class SchematicView(QGraphicsView):
             return
         kind, key = item.data(0), item.data(1)
         if kind == "component":
-            for wire, side in self._ends():
-                if getattr(wire, side+"_component_id") == key:
-                    setattr(wire, side+"_component_id", None)
-                    setattr(wire, side+"_pin_index", None)
-                    setattr(wire, side+"_pin_number", None)
-            self._sheet.components = [c for c in self._sheet.components if c.id != key]
-            self._component_items.pop(key, None)
+            if not any(c.id==key for c in self._sheet.components): return
+            from app.core.editor_operations import remove_component
+            remove_component(self._sheet, key)
+            body=self._component_items.pop(key, None)
+            if body and body is not item: self.scene.removeItem(body)
+            layer=getattr(self,'cable_layer',None)
+            if layer:
+                for cable in list(layer.usb_cables):
+                    if cable.component.id==key:
+                        for visual in [cable.path,*cable.plugs]:
+                            if visual is not item: self.scene.removeItem(visual)
+                        layer.usb_cables.remove(cable)
         elif kind == "wire":
             self._sheet.wires = [w for w in self._sheet.wires if w.id != key]
             self._wire_items.pop(key, None)
@@ -892,17 +1165,51 @@ class SchematicView(QGraphicsView):
             item = next((i for i in self.scene.selectedItems() if i.data(0) == "component"), None)
             self.on_selection(item.component if item else None)
 
-    def rotate_selected_components(self):
-        changed = False
-        for item in self.scene.selectedItems():
-            if item.data(0) == "component":
-                item.component.rotation = (item.component.rotation + 90) % 360
+    def rotate_selected_components(self,opposite=False):
+        sign=-1 if getattr(self.settings,'rotation_direction','cw')=='ccw' else 1
+        if opposite: sign=-sign
+        selected={i.component.id for i in self.scene.selectedItems() if i.data(0)=="component"}
+        handled=set()
+        blocked=set()
+        groups={c.properties.get("asset_group") for c in self._sheet.components if c.id in selected}-{None,""}
+        for group in groups:
+            members=[c for c in self._sheet.components if c.properties.get("asset_group")==group]
+            if len(members)<2 or not all(c.id in selected for c in members): continue
+            wires=[w for w in self._sheet.wires if w.group_id==group]
+            comments=[c for c in self._sheet.comments if c.group_id==group]
+            points=[(c.x,c.y) for c in members+comments]
+            points += [tuple(p) for w in wires for p in (w.points or [[w.start_x,w.start_y],[w.end_x,w.end_y]])]
+            cx=round((min(x for x,y in points)+max(x for x,y in points))/40)*20
+            cy=round((min(y for x,y in points)+max(y for x,y in points))/40)*20
+            def rotate(x,y): return cx-sign*(y-cy),cy+sign*(x-cx)
+            proposed=[(c,*rotate(c.x,c.y),(c.rotation+90*sign)%360) for c in members]
+            if any(not drawing_contains(self._sheet,QTransform().rotate(angle).mapRect(self._component_items[c.id]._hit_rect).translated(x,y)) for c,x,y,angle in proposed):
+                blocked.update(c.id for c in members)
+                continue  # Reject the whole rotation at a sheet edge; never distort the asset.
+            self._refreshing=True
+            try:
+                for c,x,y,angle in proposed:
+                    c.x,c.y,c.rotation=x,y,angle
+                    item=self._component_items[c.id]; item.setPos(x,y); item.setRotation(angle)
+                for w in wires:
+                    w.start_x,w.start_y=rotate(w.start_x,w.start_y)
+                    w.end_x,w.end_y=rotate(w.end_x,w.end_y)
+                    w.points=[list(rotate(*p)) for p in w.points]
+                for c in comments:
+                    c.x,c.y=rotate(c.x,c.y)
+                    self._comment_items[c.id].setPos(c.x,c.y)
+            finally: self._refreshing=False
+            handled.update(c.id for c in members)
+        changed = bool(handled)
+        for item in {i.data(1):self._component_items[i.data(1)] for i in self.scene.selectedItems() if i.data(0)=='component' and i.data(1) in self._component_items}.values():
+            if item.component.id not in handled|blocked:
+                from app.core.editor_operations import set_rotation
+                set_rotation(item.component, item.component.rotation + 90*sign)
                 item.setRotation(item.component.rotation)
                 changed = True
         if changed:
             self._sync_component_positions()
             self._refresh_attached_wires()
-            self._attach_free_wire_ends_to_component_pins()
             self._changed()
 
     def _sync_component_positions(self):
@@ -919,17 +1226,58 @@ class SchematicView(QGraphicsView):
                 if snapped is not None and snapped != item.pos():
                     item.setPos(snapped)
             if (model.x, model.y) != (item.x(), item.y()):
-                model.x, model.y = item.x(), item.y()
+                from app.core.editor_operations import set_position
+                set_position(model, item.x(), item.y())
                 changed = True
         return changed
 
     def _sync_wire_positions(self):
         return False  # kabli nie przenosi się jako całych obiektów
 
+    def _start_wire_preview(self, snapped):
+        self._clear_wire_preview()
+        self._wire_start = (QPointF(snapped[0]),snapped[1],snapped[2])
+        self._wire_press_scene=None; self._wire_press_from_anchor=False; self._wire_drag_moved=False
+        self._wire_preview = QGraphicsPathItem(self._wire_path([self._wire_start[0], self._wire_start[0]]))
+        self._wire_preview.setPen(QPen(QColor("#e76f51"), 2, Qt.PenStyle.DashLine))
+        self.scene.addItem(self._wire_preview)
+
+    def _complete_wire_at(self,snapped):
+        if self._wire_start is None:
+            return False
+        start,comp,pin=self._wire_start
+        end,end_comp,end_pin=snapped
+        if start==end:
+            if end_comp is not None:
+                self._clear_wire_preview()
+            return False
+        from app.canvas.routing import editor_route
+        route=editor_route(self._sheet,start,end)
+        if route is None:
+            return False
+        wire=Wire(start.x(),start.y(),end.x(),end.y(),start_component_id=comp,
+                  start_pin_index=pin,end_component_id=end_comp,end_pin_index=end_pin)
+        wire.points=[[point.x(),point.y()] for point in route]
+        self._sheet.wires.append(wire)
+        self._add_wire_item(wire)
+        # Commit means this drawing gesture is over. Clear its anchor before
+        # topology cleanup so even a malformed neighbouring wire cannot leave
+        # the old start point active if cleanup encounters bad legacy data.
+        self._clear_wire_preview()
+        self._merge_wire_overlaps({wire.id})
+        self._normalize_wire_junctions()
+        self._join_coincident_ends()
+        self._refresh_attached_wires()
+        self._changed()
+        return True
+
     def _clear_wire_preview(self):
         if self._wire_preview is not None:
             self.scene.removeItem(self._wire_preview)
         self._wire_start = self._wire_preview = None
+        self._wire_press_scene = None
+        self._wire_press_from_anchor = False
+        self._wire_drag_moved = False
 
     def _begin_inline_comment(self, point, existing=None):
         if self._annotation_editor is not None:

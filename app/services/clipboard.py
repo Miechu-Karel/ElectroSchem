@@ -76,8 +76,21 @@ def prepare_paste(project, fragment, dx, dy):
             definitions[definition["id"]] = definition
     ids = {obj.id: new_id() for field in ("components", "wires", "comments") for obj in getattr(sheet, field)}
     junctions = {}
+    groups = {}
+    for field in ("components", "wires", "comments"):
+        for obj in getattr(sheet, field):
+            group = obj.properties.get("asset_group") if field == "components" else obj.group_id
+            if group:
+                replacement = groups.setdefault(group, new_id())
+                if field == "components": obj.properties["asset_group"] = replacement
+                else: obj.group_id = replacement
     for component in sheet.components:
         component.id = ids[component.id]
+        for key in ("usb_a_target","usb_b_target",'jumper_a_target','jumper_b_target'):
+            if key in component.properties:
+                target=ids.get(component.properties[key])
+                if target: component.properties[key]=target
+                else: component.properties.pop(key)
         component.library_id = library_map.get(component.library_id, component.library_id)
         component.reference = staged.allocate_reference(component.library_id)
         component.x += dx

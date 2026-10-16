@@ -52,7 +52,7 @@ class Alpha8Models(unittest.TestCase):
 
     def test_joystick_and_receiver_click_states(self):
         for name,pin in (("Joystick Iduino ST1079","SW"),("Odbiornik IR Grove 38 kHz","SIG")):
-            b=Bench(); supply,g=b.power(); item=b.add(name,sim_x="0.25",sim_y="0.75")
+            b=Bench(); supply,g=b.power(); item=b.add(name,sim_x="0.25",sim_y="0.75",sim_switch_mode="contact")
             b.connect(supply,0,item,"VCC"); b.connect(g,0,item,"GND")
             pull=b.add("Rezystor","10","kΩ"); b.connect(pull,0,supply,0); b.connect(pull,1,item,pin)
             circuit=b.circuit(); r=circuit.step(); definition=get_definition(item.library_id)

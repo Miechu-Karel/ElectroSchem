@@ -42,6 +42,7 @@ def terminals(*values):
 add("Input", "Input", terminals((1,"OUT",40,0)), symbol="logic_input", width=80, height=40)
 add("Output", "Output", terminals((1,"IN",-40,0)), symbol="logic_output", width=80, height=40)
 add("Rezystor", "Resistor", prefix="Res", symbol="resistor", unit="Ω")
+add("Rezystor nastawny", "Variable Resistor", prefix="VarRes", symbol="variable_resistor")
 add("Kondensator Ceramiczny", "Ceramic Capacitor", prefix="CerCap", symbol="capacitor", unit="F")
 add("Kondensator Elektrolityczny", "Electrolytic Capacitor", "+|−", prefix="EleCap", symbol="polar_capacitor", unit="F")
 add("Kondensator Tantalowy", "Tantalum Capacitor", "+|−", prefix="TanCap", symbol="polar_capacitor", unit="F")
@@ -82,6 +83,7 @@ for part in ("LM7805", "LM7812"):
 add("Stabilizator AMS1117-3.3", "Linear Regulator AMS1117-3.3", "GND|OUT|IN", prefix="oth_AMS1117-3.3__", variant="SOT-223, tab = OUT", source="http://www.advanced-monolithic.com/pdf/ds1117.pdf")
 for pl,en,pre in [("Bateria 9V","Battery 9V","Bat"),("Koszyk na Akumulator 18650","Battery Holder 18650","BatHol"),("Akumulator Li-Po 3.7V","Lithium Polymer Battery 3.7V","LitPolBat")]:
     add(pl,en,"+|−",prefix=pre,symbol="battery",unit="V",height=80)
+CATALOG["Bateria 9V"].update(display_name="Bateria",name_en="Battery")
 for pl,en in [("Męski","Male"),("Żeński","Female")]:
     add("Złącze Goldpin "+pl,en+" Pin Header","1|2",prefix=en[:3]+"PinHea",symbol="connector",variant="1×2, 2.54 mm; use a custom element for another length")
 for n in (2,3):

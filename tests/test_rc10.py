@@ -279,7 +279,7 @@ class AiRc10Tests(unittest.TestCase):
         dialog = SettingsDialog(AppSettings(gemini_model="broken/old"))
         self.assertNotIsInstance(dialog.model, QLineEdit)
         dialog._accept()
-        self.assertEqual(dialog.result_settings().gemini_model, "broken/old")
+        self.assertEqual(dialog.result_settings().gemini_model, "auto")
         dialog.deleteLater()
 
 

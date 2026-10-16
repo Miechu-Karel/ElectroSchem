@@ -37,8 +37,12 @@ BEHAVIORS = {
         "auto ustawia powtarzalne wstępne napięcie do rozruchu w zakresie ±100 mV. Wpisz 0 V dla idealnego nienaładowanego kondensatora."),
     "inductor": Behavior("inductor", (), "H"),
     "battery": Behavior("dc", (), "V"),
-    "ac_source": Behavior("ac", (P("sim_frequency", "Frequency", "Częstotliwość", "Hz", "50 Hz"),), "V",
-                          "Voltage is RMS; sine wave, zero phase.", "Napięcie skuteczne RMS; sinusoida, faza zerowa."),
+    "ac_source": Behavior("ac", (P('sim_voltage_mode','Voltage specification','Sposób podania napięcia',default='rms',choices=(('rms','RMS voltage','Napięcie skuteczne'),('limits','Minimum and maximum','Napięcie minimalne i maksymalne'))),
+                          P('sim_voltage_min','Minimum voltage','Napięcie minimalne','V','-5 V',minimum=-1e6,maximum=1e6),
+                          P('sim_voltage_max','Maximum voltage','Napięcie maksymalne','V','5 V',minimum=-1e6,maximum=1e6),
+                          P("sim_frequency", "Frequency", "Częstotliwość", "Hz", "50 Hz"),
+                          P("sim_waveform", "Waveform", "Kształt fali", default="sine", choices=(("sine","Sine","Sinusoida"),("square","Square","Prostokąt"),("triangle","Triangle","Trójkąt"),("sawtooth","Sawtooth","Piła")))), "V",
+                          "Choose RMS voltage (zero mean) or explicit minimum/maximum (which may include a DC offset).", "Wybierz napięcie skuteczne (bez składowej stałej) albo minimum/maksimum (możliwa składowa stała)."),
     "lamp": Behavior("lamp", (P("sim_rated_voltage", "Rated voltage", "Napięcie znamionowe", "V"),), "W",
                      "Constant hot resistance approximation; no thermal transient.",
                      "Przybliżenie stałej rezystancji gorącego włókna; bez modelu nagrzewania."),
@@ -74,6 +78,7 @@ def approximate(kind, parameters=(), unit="", en="", pl=""):
 
 BEHAVIORS.update({
     "potentiometer": approximate("potentiometer", [P("sim_position", "Wiper position (0–1)", "Położenie suwaka (0–1)", default="0.5", minimum=0, maximum=1)], "Ω"),
+    "variable_resistor": approximate("variable_resistor", [P("sim_min_resistance", "Minimum resistance", "Minimalna rezystancja", "Ω", "0 Ω", minimum=0, maximum=1e12), P("sim_max_resistance", "Maximum resistance", "Maksymalna rezystancja", "Ω", "10 kΩ", minimum=0, maximum=1e12), P("sim_position", "Resistance setting (0–1)", "Ustawienie rezystancji (0–1)", default="0.5", minimum=0, maximum=1)]),
     "ldr": approximate("ldr", [P("sim_light", "Relative illumination (1 = reference)", "Względne oświetlenie (1 = odniesienie)", default="1", minimum=.001, maximum=1000)], "Ω",
                        "Resistance = entered reference resistance / relative illumination.", "Rezystancja = wpisana rezystancja odniesienia / względne oświetlenie."),
     "thermistor": approximate("thermistor", [P("sim_temperature", "Temperature [K]", "Temperatura [K]", default="298.15", minimum=1, maximum=1000), P("sim_beta", "Beta [K]", "Beta [K]", default="3950")], "Ω",
@@ -110,9 +115,18 @@ def behavior_for(definition):
     profile = profile_for(definition)
     if profile:
         return Behavior("mcu" if profile.ready else "mcu_gpio",
-            note_en=profile.reason_en+" GPIO script mode supports digital pins only. Create a program or assign an existing source file using the buttons above. It does not emulate the OS or CPU.",
-            note_pl=profile.reason_pl+" Tryb skryptu GPIO obsługuje piny cyfrowe. Utwórz program lub przypisz istniejący plik kodu przyciskami powyżej. Nie emuluje systemu ani procesora.")
+            note_en=profile.reason_en+" GPIO script mode supports digital pins only. Create or assign a program. Point at or select a Raspberry Pi and press E for its console. It does not emulate the OS or CPU.",
+            note_pl=profile.reason_pl+" Tryb skryptu GPIO obsługuje piny cyfrowe. Utwórz program lub przypisz istniejący plik kodu. Wskaż lub zaznacz Raspberry Pi i naciśnij E, aby otworzyć konsolę. Nie emuluje systemu ani procesora.")
     symbol, name = definition.symbol, definition.name
+    from app.libraries.alpha139_parts import behavior as behavior139
+    added=behavior139(definition)
+    if added: return added
+    from app.libraries.alpha134_models import behavior as behavior134
+    added = behavior134(definition)
+    if added: return added
+    from app.libraries.alpha130_models import behavior
+    added = behavior(definition)
+    if added: return added
     if symbol == "power":
         voltage = "3.3 V" if "+3.3V" in name else "12 V" if "+12V" in name else "5 V"
         parameters = (P("sim_voltage", "Supply voltage", "Napięcie zasilania", "V", voltage),) if name.endswith("VCC") else ()

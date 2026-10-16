@@ -57,6 +57,29 @@ class Alpha2Tests(unittest.TestCase):
         pot.properties["sim_position"]="1.2"
         with self.assertRaisesRegex(SimulationError,"parameters"): b.circuit()
 
+    def test_two_terminal_variable_resistor_uses_adjustable_range(self):
+        b=Bench(); supply,ground=b.power()
+        variable=b.add("Rezystor nastawny",sim_min_resistance="1 kΩ",sim_max_resistance="5 kΩ",sim_position="0")
+        b.connect(supply,0,variable,0); b.connect(variable,1,ground,0)
+        circuit=b.circuit(); device=next(d for d in circuit.devices if d.component.id==variable.id)
+        low=circuit.step().currents[variable.id]
+        device.parameters["sim_position"]=1
+        high=circuit.step().currents[variable.id]
+        self.assertAlmostEqual(low,.005,places=6)
+        self.assertAlmostEqual(high,.001,places=6)
+
+    def test_variable_resistor_range_compares_prefixed_physical_values(self):
+        b=Bench(); supply,ground=b.power()
+        variable=b.add("Rezystor nastawny",sim_min_resistance="1 kΩ",sim_max_resistance="900 Ω")
+        b.connect(supply,0,variable,0); b.connect(variable,1,ground,0)
+        with self.assertRaisesRegex(SimulationError,"Maximum resistance"):
+            b.circuit()
+
+    def test_resistance_readings_use_engineering_prefixes(self):
+        from app.core.units import format_si
+        self.assertEqual(format_si(1.454645621e19,"Ω"),"14.55 EΩ")
+        self.assertEqual(format_si(.00000000145,"Ω"),"1.45 nΩ")
+
     def test_npn_correct_pin_mapping_switches_load_and_draws_base_current(self):
         for name in ("Tranzystor NPN PN2222","Tranzystor NPN BC547"):
             b=Bench(); s,g=b.power(); q=b.add(name); load=b.add("Rezystor","1","kΩ"); base=b.add("Rezystor","10","kΩ")

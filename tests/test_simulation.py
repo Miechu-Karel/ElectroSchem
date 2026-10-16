@@ -12,6 +12,7 @@ from app.simulation.engine import Circuit, SimulationError, si_value
 from app.simulation.netlist import build_netlist
 
 BY_NAME = {d.name:d for d in BUILT_IN_ITEMS}
+BY_NAME["Bateria 9V"]=BY_NAME["Bateria"]
 
 
 def component(name, x, y, value="", unit="", **properties):
@@ -170,7 +171,7 @@ class SimulationTests(unittest.TestCase):
         self.assertNotEqual(net.pins[r.id,1],net.wires[w.id])
 
     def test_every_component_and_board_has_explicit_status(self):
-        self.assertEqual(len(functionality_database()),145)
+        self.assertEqual(len(functionality_database()),215)
         boards=[d.name for d in BUILT_IN_ITEMS if d.category=="Mikrokontrolery i SBC"]
         self.assertEqual(set(boards),set(PROFILES))
         self.assertFalse(PROFILES["Raspberry Pi 5"].ready)

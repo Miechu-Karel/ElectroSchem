@@ -20,8 +20,8 @@ BY_NAME = {item.name: item for item in BUILT_IN_ITEMS}
 
 class CatalogTests(unittest.TestCase):
     def test_original_library_is_complete_without_custom_placeholder(self):
-        self.assertEqual(len(BUILT_IN_ITEMS), 152)
-        self.assertEqual(len(ITEM_BY_ID), 152)
+        self.assertEqual(len(BUILT_IN_ITEMS), 226)
+        self.assertEqual(len(ITEM_BY_ID), 226)
         self.assertEqual(set(BY_NAME), {data.get("display_name", name) for name, data in CATALOG.items()})
         self.assertFalse(any(item.category == "Własne" for item in BUILT_IN_ITEMS))
         # Stary zapis nadal daje się otworzyć, ale szablon nie trafia do menu.
@@ -32,7 +32,8 @@ class CatalogTests(unittest.TestCase):
     def test_every_pin_is_unique_finite_on_grid_and_inside_selection(self):
         for item in BUILT_IN_ITEMS:
             with self.subTest(item=item.name):
-                self.assertTrue(item.pins)
+                if item.name in {"Karta RFID", "Zapałka", "Cel ultradźwiękowy", "Osoba", "Pilot IR"}: self.assertFalse(item.pins)
+                else: self.assertTrue(item.pins)
                 self.assertEqual(item.width % 40, 0)
                 self.assertEqual(item.height % 40, 0)
                 self.assertEqual(len({pin.number for pin in item.pins}), len(item.pins))
@@ -45,6 +46,22 @@ class CatalogTests(unittest.TestCase):
                     self.assertEqual(pin.y % 20, 0)
                     self.assertLessEqual(abs(pin.x), item.width / 2)
                     self.assertLessEqual(abs(pin.y), item.height / 2)
+
+    def test_interactive_props_have_stable_card_identity_and_no_wires(self):
+        card=BY_NAME["Karta RFID"]
+        match=BY_NAME["Zapałka"]
+        target=BY_NAME["Cel ultradźwiękowy"]
+        person=BY_NAME["Osoba"]
+        remote=BY_NAME["Pilot IR"]
+        self.assertEqual(card.category,"Elementy interaktywne")
+        self.assertEqual(card.id,"moduły-i-interfejsy-karta-rfid")
+        self.assertEqual(match.category,"Elementy interaktywne")
+        self.assertEqual(match.symbol,"match")
+        self.assertEqual(target.symbol,"ultrasonic_target")
+        self.assertEqual(person.symbol,"motion_target")
+        self.assertEqual(remote.symbol,"ir_remote")
+        self.assertTrue(all(item.category=="Elementy interaktywne" for item in (card,match,target,person,remote)))
+        self.assertFalse(card.pins or match.pins or target.pins or person.pins or remote.pins)
 
     def test_large_board_counts_and_fit_are_not_two_pin_placeholders(self):
         expected = {
@@ -122,6 +139,11 @@ class CatalogTests(unittest.TestCase):
         for item in BUILT_IN_ITEMS:
             with self.subTest(item=item.name):
                 prefix = item.reference_prefix
+                if item.name == "Keypad 4x4":
+                    # Keep the established reference prefix after the UI-only
+                    # rename so existing designators remain recognizable.
+                    self.assertEqual(prefix, "MemKey44")
+                    continue
                 if not prefix.startswith(("s_", "ic_", "mc_", "oth_")) and prefix != "LED":
                     self.assertEqual(prefix, electronic_prefix(item.name_en))
                 self.assertTrue(prefix.isprintable())
@@ -134,8 +156,9 @@ class CatalogTests(unittest.TestCase):
                 self.assertIsInstance(item.verified, bool)
                 if item.verified:
                     self.assertTrue(item.source_url.startswith("https://"))
-                self.assertEqual(item_name(item, "pl"), item.name)
-                self.assertEqual(item_name(item, "en"), item.name_en)
+                from app.libraries.ic_info import label
+                self.assertEqual(item_name(item, "pl"), label(item, "pl") or item.name)
+                self.assertEqual(item_name(item, "en"), label(item, "en") or item.name_en)
         self.assertNotIn("kamerą", BY_NAME["Seeed Studio XIAO ESP32-S3 Sense (z kamerą OV3660)"].name_en)
         self.assertFalse(BY_NAME["Dioda RGB"].verified)  # Colour lead order varies.
         self.assertFalse(BY_NAME["ESP32-S3 NodeMCU"].verified)  # Not a single board revision.

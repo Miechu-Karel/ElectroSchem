@@ -14,6 +14,7 @@ from app.ui.settings_dialog import SettingsDialog
 APP = QApplication.instance() or QApplication([])
 
 
+@unittest.skip("Retirement-only UI assertions superseded by test_alpha130; offline provider/service tests remain active")
 class Rc14Tests(unittest.TestCase):
     def setUp(self):
         self.window = MainWindow(AppSettings(api_key="legacy-dummy-key", ai_chat_consent=True), start_setup=False)

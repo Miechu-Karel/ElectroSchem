@@ -34,8 +34,9 @@ class PythonBoard(GpioScript):
         self.physical={p.number:gpio_alias(p.name) for p in definition.pins}
         self.raspberry="Raspberry Pi" in definition.name and "Pico" not in definition.name
         self.env={}; self.locals=[]; self.global_names=[]
-        self.states={}; self.inputs={}; self.time=0.; self.wake=0.; self.steps=0
+        self.states={}; self.inputs={}; self.pwm={}; self.time=0.; self.wake=0.; self.steps=0
         self.board_numbering=False; self.bus_write=None; self.serial=""
+        self.stdin=[]; self.waiting_input=False
         self.root=Path(source_path).resolve().parent if source_path else None
         self.modules={}; self.lcds={}; self.depth=0
         for node in ast.walk(self.tree):
@@ -54,7 +55,7 @@ class PythonBoard(GpioScript):
     def lookup(self,name):
         if self.locals and name in self.locals[-1]: return self.locals[-1][name]
         if name in self.env: return self.env[name]
-        if name in {"range","len","str","int","float","bool","chr","ord","hex","bin","abs","min","max","round","list","tuple","bytes","enumerate","zip","print"}:
+        if name in {"range","len","str","int","float","bool","chr","ord","hex","bin","abs","min","max","round","list","tuple","bytes","enumerate","zip","print","input"}:
             return ("api",name)
         raise ValueError("Unknown Python variable: "+name)
 
@@ -88,8 +89,13 @@ class PythonBoard(GpioScript):
         if isinstance(node,ast.Attribute):
             base=yield from self.evaluate(node.value)
             if isinstance(base,dict) and node.attr in base: return base[node.attr]
-            if isinstance(base,tuple) and base[0] in {"api","pin","lcd","bus"}:
-                if node.attr in {"OUT","IN","BCM","BOARD","HIGH","LOW","PUD_UP","PUD_DOWN"}: return node.attr
+            if isinstance(base,tuple) and base[0] in {"api","pin","lcd","bus","pwm"}:
+                if base == ("api", "sys") and node.attr in {"stdin", "stdout", "stderr"}:
+                    return ("api", "sys."+node.attr)
+                if node.attr in {"OUT","IN","BCM","BOARD","HIGH","LOW","PUD_UP","PUD_DOWN","PULL_UP","PULL_DOWN"}: return node.attr
+                if base[0]=="pin" and node.attr in {"is_pressed", "is_active"}:
+                    high = bool(self.inputs.get(base[1], self.states.get(base[1]) == 3))
+                    return not high if len(base)>2 and base[2] else high
                 if base[0]=="lcd" and node.attr in {"cursor_pos","backlight_enabled"}: return self.lcds[base[1]][node.attr]
                 return ("method",base,node.attr)
             if isinstance(base,str) and node.attr in {"format","upper","lower","strip","ljust","rjust","replace"}:
@@ -182,12 +188,35 @@ class PythonBoard(GpioScript):
                     return None
                 if name=="close": return None
             elif base[0]=="lcd": return self.lcd_call(base[1],name,args,kwargs)
+            elif base[0]=="pwm":
+                pin=base[1]
+                if name in {"start","ChangeDutyCycle","ChangeFrequency"}:
+                    if name=="ChangeFrequency":
+                        frequency=float(args[0])
+                        if not math.isfinite(frequency) or frequency<=0: raise ValueError("PWM frequency must be positive")
+                        self.pwm[pin]['frequency']=frequency
+                    else:
+                        duty=float(args[0]) if args else 0.
+                        if not math.isfinite(duty) or not 0<=duty<=100: raise ValueError("PWM duty cycle must be 0..100")
+                        self.pwm[pin]['duty']=duty; self.states[pin]=int(duty>0)
+                    return None
+                if name=="stop": self.pwm[pin]['duty']=0.; self.states[pin]=0; return None
             if base[0]!="api": raise ValueError("Unsupported simulated device call: "+name)
         if function[0]=="string":
             if function[2] in {"ljust","rjust"} and args and args[0]>100000: raise ValueError("String limit exceeded")
             if function[2]=="format" and ("__" in function[1] or any(int(n)>100000 for n in re.findall(r"\d+",function[1]))): raise ValueError("Format limit exceeded")
             return getattr(function[1],function[2])(*args,**kwargs)
         name=function[1]; short=name.rsplit(".",1)[-1]
+        if name == "input" or name in {"sys.stdin.readline", "sys.stdin.read"}:
+            if name == "input" and args: self.serial=(self.serial+str(args[0]))[-65536:]
+            self.waiting_input=True
+            while not self.stdin: yield .01
+            self.waiting_input=False
+            value=self.stdin.pop(0)
+            return value if name == "input" else value+"\n"
+        if name in {"sys.stdout.write", "sys.stderr.write"}:
+            text=str(args[0]); self.serial=(self.serial+text)[-65536:]; return len(text)
+        if name in {"sys.stdout.flush", "sys.stderr.flush"}: return None
         if short in {"sleep","sleep_ms"}:
             delay=float(args[0])/(1000 if short=="sleep_ms" else 1)
             if not math.isfinite(delay) or delay<=0: raise ValueError("sleep must be positive and finite")
@@ -196,15 +225,28 @@ class PythonBoard(GpioScript):
         if short in {"Pin","LED","DigitalOutputDevice","DigitalInputDevice","Button"}:
             pin=self.pin(args[0] if args else kwargs["pin"])
             mode=args[1] if len(args)>1 else kwargs.get("mode","IN" if short in {"Button","DigitalInputDevice"} else "OUT")
-            self.states[pin]=2 if mode=="IN" else int(bool(kwargs.get("initial_value",0)))
-            return ("pin",pin)
+            pull = kwargs.get("pull", args[2] if len(args)>2 else "")
+            if short in {"Button", "DigitalInputDevice"}: pull = "PUD_UP" if kwargs.get("pull_up", True) else "PUD_DOWN"
+            self.states[pin]=(3 if pull in {"PUD_UP", "PULL_UP"} else 4 if pull in {"PUD_DOWN", "PULL_DOWN"} else 2) if mode=="IN" else int(bool(kwargs.get("initial_value",0)))
+            return ("pin",pin,short in {"Button", "DigitalInputDevice"} and kwargs.get("pull_up",True))
         if short=="setmode": self.board_numbering=args[0]=="BOARD"; return None
         if short=="setup":
-            for value in (args[0] if isinstance(args[0],(list,tuple)) else [args[0]]): self.states[self.pin(value)]=2 if args[1]=="IN" else int(kwargs.get("initial",0) not in {0,False,"LOW"})
+            pull = kwargs.get("pull_up_down", args[2] if len(args)>2 else "")
+            state = 3 if pull=="PUD_UP" else 4 if pull=="PUD_DOWN" else 2
+            for value in (args[0] if isinstance(args[0],(list,tuple)) else [args[0]]): self.states[self.pin(value)]=state if args[1]=="IN" else int(kwargs.get("initial",0) not in {0,False,"LOW"})
             return None
         if short=="output":
             self.states[self.pin(args[0])]=int(args[1] not in {0,False,"LOW"}); return None
-        if short=="input": return int(self.inputs.get(self.pin(args[0]),False))
+        if short=="input":
+            if len(args)!=1: raise ValueError("GPIO.input(pin) takes one argument; compare its result with GPIO.HIGH")
+            return int(self.inputs.get(self.pin(args[0]),False))
+        if short=="PWM":
+            if len(args)<2: raise ValueError("GPIO.PWM requires a pin and frequency")
+            pin=self.pin(args[0]); frequency=float(args[1])
+            if self.states.get(pin)==2: raise ValueError("PWM pin must be configured as GPIO.OUT first")
+            if not math.isfinite(frequency) or frequency<=0: raise ValueError("PWM frequency must be positive")
+            self.pwm[pin]={'frequency':frequency,'duty':0.}; self.states[pin]=0
+            return ("pwm",pin)
         if short=="cleanup": self.states={pin:2 for pin in self.states}; return None
         if short=="setwarnings": return None
         if short in {"SMBus","I2C","SoftI2C"}: return ("bus",int(args[0] if args else kwargs.get("id",1)))
@@ -216,7 +258,9 @@ class PythonBoard(GpioScript):
             self.write_nibble(address,3); self.write_nibble(address,3); self.write_nibble(address,2)
             for value in (0x28,0x0c,1,6): self.write_lcd(address,value)
             return ("lcd",address)
-        if name=="print": self.serial+=(" ".join(map(str,args))+"\n")[:4096-len(self.serial)]; return None
+        if name=="print":
+            self.serial=(self.serial+str(kwargs.get("sep"," ")).join(map(str,args))+str(kwargs.get("end","\n")))[-65536:]
+            return None
         builtins={"range":range,"len":len,"str":str,"int":int,"float":float,"bool":bool,"chr":chr,"ord":ord,"hex":hex,"bin":bin,"abs":abs,"min":min,"max":max,"round":round,"list":list,"tuple":tuple,"bytes":bytes,"enumerate":lambda x:list(enumerate(x)),"zip":lambda *x:list(zip(*x))}
         if name in builtins:
             if name=="bytes" and args and isinstance(args[0],int) and args[0]>100000: raise ValueError("Bytes limit exceeded")
@@ -255,7 +299,7 @@ class PythonBoard(GpioScript):
         else: raise ValueError("Unsupported LCD method: "+name)
 
     def import_module(self,name):
-        known={"time","machine","gpiozero","RPi.GPIO","electroschem","smbus","smbus2","RPLCD.i2c"}
+        known={"time","machine","gpiozero","RPi.GPIO","electroschem","smbus","smbus2","RPLCD.i2c","sys"}
         if name in known: return ("api",name)
         if name in self.modules: return self.modules[name]
         if self.root is None or not name.isidentifier() or name.startswith("_") or len(self.modules)>=16:
@@ -299,8 +343,12 @@ class PythonBoard(GpioScript):
                 while (yield from self.evaluate(node.test)):
                     self.budget()
                     try: yield from self.block(node.body)
-                    except Continue: continue
+                    except Continue: pass
                     except Break: break
+                    # Yield a simulation millisecond for tight polling loops.
+                    # Sleep remains recommended for realistic timing, but an
+                    # input-driven loop must not consume the instruction budget.
+                    yield .001
                 else: yield from self.block(node.orelse)
             elif isinstance(node,ast.For):
                 values=yield from self.evaluate(node.iter)
@@ -326,3 +374,7 @@ class PythonBoard(GpioScript):
             except StopIteration: self.wake=math.inf; break
         self.time=target
         return dict(self.states)
+
+    def submit_input(self, text):
+        if len(self.stdin)>=100: raise ValueError("Simulated input queue is full")
+        self.stdin.append(str(text)[:4096])

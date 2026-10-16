@@ -32,9 +32,16 @@ class Rc4Tests(unittest.TestCase):
         window.project.custom_components.append(definition())
         def execute():
             menu = APP.activePopupWidget()
-            submenu = menu.actions()[0].menu()
-            submenu.actions()[0].trigger()
-            submenu.actions()[1].trigger()
+            action=next(a for a in menu.actions() if a.data()=="custom-rc4")
+            self.assertIsNone(action.menu())
+            def edit_context():
+                popup=APP.activePopupWidget(); popup.actions()[0].trigger(); popup.close()
+            QTimer.singleShot(0,edit_context)
+            menu.customContextMenuRequested.emit(menu.actionGeometry(action).center())
+            def delete_context():
+                popup=APP.activePopupWidget(); popup.actions()[1].trigger(); popup.close()
+            QTimer.singleShot(0,delete_context)
+            menu.customContextMenuRequested.emit(menu.actionGeometry(action).center())
             menu.close()
         with patch.object(window, "edit_custom_component") as edit, patch.object(window, "delete_custom_component") as delete:
             QTimer.singleShot(0, execute)

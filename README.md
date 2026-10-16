@@ -1,11 +1,275 @@
 # ElectroSchem
 
-**ElectroSchem 1.2.1** is an offline desktop editor for electronic schematics,
+**ElectroSchem 1.3.0** is a desktop editor for electronic schematics,
 built with Python and PySide6 (Qt). Draw circuits, connect components and
 prepare documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
+
+### Latest release 1.3.0
+
+Version 1.3.0 promotes the tested 1.3.0rc25. It includes the **Terminale**
+submenu for terminal blocks, ELS format v4 saves, and the other RC25 features.
+See [1.3.0 release details](docs/RELEASE130.md).
+
+### Previous release candidate 1.3.0rc25
+
+RC25 added the **Terminale** submenu under **Kable i złącza**. See
+[RC25 details](docs/RC1325.md).
+
+### Previous development version 1.3.0rc24
+
+RC24 removes the intermediate **Przyrządy pomiarowe** submenu, so instruments
+open directly. **Kable i złącza** now has **Porty USB**, **Goldpiny** and
+**Kable** subcategories. New saves use ELS format v4, which older releases
+reject instead of opening. The bilingual usage instructions have been updated.
+See [RC24 details](docs/RC1324.md).
+
+### Previous development version 1.3.0rc23
+
+RC23 moved the measurement-tools and interactive-components categories to the
+bottom of the component sidebar and moved the RFID card markings upward. See
+[RC23 details](docs/RC1323.md).
+
+### Previous development version 1.3.0rc22
+
+RC22 moved interactive components below measurement tools in the library and
+stacked the card ID above its “RFID” marking to the right of the chip. See
+[RC22 details](docs/RC1322.md).
+
+### Previous development version 1.3.0rc21
+
+RC21 adds interactive components with draggable RFID cards, matches, ultrasonic
+reflectors, PIR person props and an IR remote, plus sensor stimulus sliders,
+physical-looking simulation props, and square navigation/numeric keyboard keys.
+See [RC21 details](docs/RC1321.md).
+
+### Previous development version 1.3.0rc20
+
+RC20 stabilizes routing while moving shared wire junctions and removes spurious
+short elbows. It retains RC19's independent wire-drawing gestures and visible
+nodes at isolated floating ends. Full application testing is pending. See
+[RC20 details](docs/RC1320.md).
+
+### Previous development version 1.3.0rc19
+
+RC19 cancels wire drawing after each completed segment, shows nodes at isolated
+floating wire ends, and debounces canvas fitting while minimizing/restoring.
+See [RC19 details](docs/RC1319.md).
+
+### Previous development version 1.3.0rc18
+
+RC18 stabilizes the wire-drawing bend, fixes junction-dot display for
+non-branching connections, updates measurement guidance, refines the assistant
+status/buttons, and adds a voltage cursor and finer time/division steps to the
+oscilloscope. See [RC18 details](docs/RC1318.md).
+
+### Previous development version 1.3.0rc17
+
+RC17 preserves and validates the selected OpenAI model, refreshes the obsolete
+AI help text for the currently exposed question-and-answer interface, and adds
+regressions for the release, current assistant controls, and asset case tests.
+See [RC17 details](docs/RC1317.md).
+
+### Previous development version 1.3.0rc16
+
+RC16 recalculates moved wires to the shortest legal route whenever their
+endpoints move, whether dragged directly, moved with a component, or moved as
+part of a selection. See [RC16 details](docs/RC1316.md).
+
+### Previous development version 1.3.0rc15
+
+RC15 aligns custom-asset interaction and light windows with their live
+components, fixes case-editor stroke origins, and formats resistance readings
+with SI prefixes. See [RC15 details](docs/RC1315.md).
+
+### Previous RC10 changes
+
+RC10 restores introductory AI exercises and retries invalid AI proposals. See
+[RC10 details](docs/RC1310.md).
+
+### Previous RC9 changes
+
+RC9 added asset-case selection and interaction validation, internal-part property permissions, and fixes to asset illumination and GPIO/PWM execution. See [RC9 details](docs/RC1309.md).
+
+### Previous RC8 changes
+
+RC8 merges IN/OUT tools into one grid-snapped PIN tool, adds an editable
+selection area and terminal stems, and improves light/interaction target
+selection in asset cases. Pencil drawings save as an outer envelope.
+Wire stretching removes redundant bends and loops; cable plugs stay within
+the editor drawing area. Local AI supports protected API tokens and specific
+authentication diagnostics; AI errors can be copied. See [RC8 details](docs/RC1308.md).
+
+### Previous RC7 changes
+
+RC7 allows free placement of case terminals. Shift constrains rectangles to
+squares and ellipses to circles. Saved cases display the union of their shapes,
+without inner construction edges, and remain visible in the simulator while
+their internal circuit is solved. Case light windows and interaction regions
+can be assigned to internal components. See [RC7 details](docs/RC1307.md).
+
+### Previous RC6 changes
+
+RC6 adds Paint-style case tools: freehand pencil, Shift straight lines,
+rectangles/circles, erasing, undo, and explicit IN/OUT terminals connected to
+chosen internal pins. New cases start without autogenerated terminals.
+Legacy 45-degree wires retain their angles when stretched; dragging uses
+the original gesture geometry rather than accumulating bends frame by frame.
+See [RC6 usage and limitations](docs/RC1306.md). This is still a release candidate.
+
+### Previous RC5 changes
+
+RC5 adds a native asset case editor with rectangles, circles, shape erasing,
+exported-pin positioning and a visual circuit miniaturizer. Saving an asset now
+requires selecting its components. Hold Shift+S to see faint wires beneath
+cases, or enable this permanently in editor settings. Jumper housings are slim,
+goldpins regain their previous appearance, and assistant routing prefers
+orthogonal paths with penalties for crossings. See [RC5 details](docs/RC1305.md).
+
+### Previous RC4 changes
+
+RC4 adds an editable, isolated proposal preview: move and rotate parts, save to
+the proposal, then Accept to transfer the changes into the actual project.
+The assistant has a question/explanation mode with editing blocked, plus a local
+readability report and better routing preferences. Sound cycles on the large
+button, probes start free, and cable edits preserve simulation time and device
+state. Rotation direction is configurable. See [RC4 details](docs/RC1304.md).
+
+### Previous RC3 changes
+
+RC3 adds a tested educational USB-C five-output reference to assistant examples
+and offers it on an empty sheet after explicitly confirming its assumptions.
+Scope controls sit beside each instrument. A 104-key simulator keyboard has
+one-shot modifiers, I2C addresses use hexadecimal input, sound offers 50% and
+25%, and cables/connectors sit directly below electronics with the supplied icon.
+Breadboard is no longer offered. Cable plug housings are rectangular with USB
+ports inside them. See [RC3 details and limitations](docs/RC1303.md).
+
+RC2 removes the drawn-wire/jumper mode selector and two-click automatic jumper
+creation. Cables remain in their own category and can still be plugged by dragging
+their ends. An offline bilingual local-AI tutorial is available in Settings → AI
+and Usage Instructions: Ollama / LM Studio setup, model sizes, memory/context,
+privacy, limitations and troubleshooting. No models are downloaded automatically.
+
+RC1 adds a selectable drawn-wire/jumper connection mode and a mini breadboard,
+with a separate cable category, visible secondary buzzers in Sound, cable-only
+goldpin plug contacts, and unified monochrome connector graphics. Scope controls
+are embedded directly in the simulator. H shows pin details, model limits and
+documentation links. Planning questions are scoped to each request, with numeric
+power-budget checks and explicit USB-PD/current-limiting limitations.
+See [RC1 details and test notes](docs/RC1301.md).
+
+Alpha11 adds triggered, stationary oscilloscope acquisitions, live voltage/time
+scales and defaults with optional automatic scaling of both axes. A laboratory
+CV/CC supply is adjustable in the sandbox. USB and male/female jumper cables can
+be plugged in the editor and simulator. AI consent is remembered, conversation
+cards support editing/stopping. RC1 rechecks clarification before drawing.
+See [alpha11 details and limitations](docs/ALPHA1311.md).
+
+Alpha10 fixes continuity measurements and adds their audible signal, functional
+IC names and smaller categories, NE567, clickable AI error explanations and a
+separate planning stage. Oscilloscopes have a fixed adjustable vertical scale
+and selectable display sizes; AC sources support RMS or explicit voltage limits.
+Simulation can stop on failure or continue unaffected electrical islands.
+See [alpha10 details and limitations](docs/ALPHA1310.md).
+
+Alpha9 adds 29 named IC packages with documented educational model limits,
+E inspection/actions, restored F Favorites, upright switch labels, corrected
+USB socket/Goldpin geometry, optional OFF positions, safe proposal regeneration
+and a loopback-only local AI adapter. See [alpha9 details](docs/ALPHA139.md).
+
+Alpha8 fixes USB-powered Pi rails and switch geometry updates, adds a clickable
+USB keyboard, useful USB pin help, refreshed toolbar icons and three failure
+examples. E opens component properties in the editor or performs an action in the
+sandbox; F toggles Favorites. Shared edited cable stretches longer than one
+grid cell become one electrical wire; examples and AI routing avoid overlaps.
+Course task 18 now applies its input fixture and checks the entire truth table.
+See [alpha8 details and limitations](docs/ALPHA138.md).
+
+Alpha7 added Favorites (F / Shift+F), searchable category labels, selectable AC
+waveforms, a USB-C LED example and common-centre asset rotation. Unpowered
+passive islands run without a supply; LED/diode resistance uses a virtual
+1 mA / 3 V meter and is polarity-dependent. USB cable/power-brick contacts are
+internal, board sockets occupy a separate bottom strip, and AC/DC converters
+use AC+, AC-, DC+, DC- labels without changing saved physical pin numbers.
+See [alpha7 details and limitations](docs/ALPHA137.md).
+
+### Previous development version 1.3.0alfa6
+
+Alphas 5–6 add configurable draggable USB plugs and edge sockets, a moving
+multimeter with two probes, AC RMS readings, a continuity beep and oscilloscope
+plots. Passive resistance-only circuits run without an external supply.
+The adjustable battery is named Battery. Goldpin has asymmetric leads;
+multi-position switches have 1–10 outputs. Unboxed assets move together,
+with Shift for individual movement and independent groups after duplication.
+Instrument menus are flat and simulation tool buttons are compact squares.
+AI requests display provider/model, request count, shared data and billing
+information; declared ADD properties are normalized into SET_PROPERTY commands.
+New wire routes avoid overlaps longer than half a grid cell.
+See [alpha6 details and limitations](docs/ALPHA136.md).
+
+Joystick SW now defaults to released LOW / held HIGH, with physical active-LOW
+contact mode available in its properties. USB sockets/cables are passive: a
+separate power source is required. New parts include a six-position switch,
+two-ended gold pin, USB cable/keyboard/power brick, an educational MT64 motor
+and five schematic measurement instruments. Measurement tools have a dedicated
+sidebar category and live probes/waveforms in the sandbox. RFID card IDs are
+editable and cards can be dragged near an RC522 for UID preview (not RF/SPI).
+
+Settings are grouped into General, Editor and code, AI and Simulation tabs.
+The AI button is shown when an AI provider is selected; the editor terminal is
+hidden. Raspberry Pi consoles open on board clicks and support cooperative
+program `input()` and
+`sys.stdin/stdout/stderr`, not unrestricted Python or an operating-system shell.
+USB keyboards provide text entry when powered and connected to a simulated
+Python board; no USB HID host stack is emulated.
+
+File > Save as Asset stores a selected circuit (or the whole sheet) for reuse
+across projects. Place original circuit copies or a configurable module case;
+simulation expands cases into their original circuits. Assets are bounded JSON,
+not executable plugins. See [alpha4 details](docs/ALPHA134.md).
+
+Before its first project request, AI can run 20 actual provider exercises after
+separate cost consent. Commands are electrically checked and successful
+examples cached locally for later prompts. Preparation can be cancelled and
+resumed; a failed exercise does not count. No provider weights are trained.
+Live provider onboarding has not been tested using paid API requests.
+
+Held tact/keypad/joystick contacts now release with the mouse. Raspberry Pi
+GPIO input pull-ups/pull-downs are modeled, including gpiozero button polarity.
+USB and Lightning connectors receive power only through external sources.
+Parallel DACs (8, 10 and 12 bits) have a dedicated menu. Click the proposal
+thumbnail to inspect it. AI receives 65 bundled design conditions and 20
+topic-selected circuit recipes. Live pacing adapts the integration step within
+frequency and reactive limits and displays actual measured speed; hardware
+compute limits remain visible rather than falsifying simulated time.
+
+Provider settings offer Gemini, OpenAI, Local AI or None, with a provider-aware
+key field and an editable OpenAI model ID. The current assistant interface
+answers questions and explains concepts; circuit generation and the editor
+command terminal are hidden. Power menus are split into smaller groups. Tact
+and joystick presses have visible feedback; the joystick also has a clickable
+SW button.
+
+The editor and simulator work offline. Optional cloud AI uses Gemini or OpenAI
+with separate, locally protected API keys and explicit transfer consent; local
+AI requires a model server that the user has already started. No API key is
+included in project files. The AI button disappears when the provider is set to
+None. Settings includes a local-AI setup guide.
+
+This alpha adds momentary tact/keypad inputs, mouse-motion PIR, a draggable
+joystick, a solar-panel illumination slider, a Raspberry Pi Python-output
+console, USB/Lightning contacts, AC/DC and DC/AC conversion, buck/boost models,
+regulators, a parallel DAC, LM393, LM324, CD4066, Grove LSM6DS3 and a passive RFID
+card preview. Simulation parameters have separate numeric/unit fields; C selects
+comments and module names can be copied from properties.
+
+See [AI and command safety](docs/ASSISTANT.md) and [simulation limitations](docs/SIMULATION.md).
+Grove motion/I2C registers and RFID radio/SPI protocols are not implemented in
+this alpha. Portable builds remain at the latest stable release, **1.2.1**;
+the alpha has not been published.
 
 ### Stable release 1.2.1
 

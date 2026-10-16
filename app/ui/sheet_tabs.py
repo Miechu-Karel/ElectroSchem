@@ -16,7 +16,7 @@ class SheetTabBar(QTabBar):
         self.setExpanding(False)
         self.setUsesScrollButtons(True)
         self._plus_rect = QRect()
-        self._add_icon = QIcon(str(Path(__file__).resolve().parents[2] / "Ikonki" / "Dodaj Arkusz.png"))
+        self._add_icon = QIcon(str(Path(__file__).resolve().parents[2] / "icons" / "add_sheet.png"))
 
     def tabSizeHint(self, index):
         width = max(100, self.fontMetrics().horizontalAdvance(self.tabText(index)) + 48)
@@ -53,7 +53,7 @@ class SheetTabBar(QTabBar):
             painter.drawRoundedRect(self._plus_rect, 4, 4)
             if dark:
                 from app.ui.theme import themed_icon
-                icon=themed_icon(Path(__file__).resolve().parents[2]/"Ikonki"/"Dodaj Arkusz.png",True)
+                icon=themed_icon(Path(__file__).resolve().parents[2]/"icons"/"add_sheet.png",True)
             else: icon=self._add_icon
             icon.paint(painter, self._plus_rect.adjusted(3, 3, -3, -3))
 

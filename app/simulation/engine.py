@@ -7,10 +7,11 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from hashlib import sha256
-from math import isfinite, sin, pi, sqrt, exp
+from math import isfinite, sin, pi, sqrt, exp, sumprod
 from app.core.units import parse_value, split_unit
 from app.core.led_colors import color_key
 from app.libraries.simulation_catalog import behavior_for
+from app.libraries.built_in import get_definition
 from app.simulation.netlist import build_netlist
 from app.libraries.emulator_catalog import profile_for, gpio_name
 from app.simulation.extended import linearize, finish
@@ -18,6 +19,19 @@ from app.simulation.extended import linearize, finish
 
 class SimulationError(ValueError):
     pass
+
+
+def ac_voltage(rms, frequency, time, waveform="sine", voltage_min=None, voltage_max=None):
+    phase=(time*frequency)%1
+    factor=1 if waveform=='square' else sqrt(3) if waveform in {'triangle','sawtooth'} else sqrt(2)
+    unit=1 if waveform=='square' and phase<.5 else -1 if waveform=='square' else 1-4*abs((phase+.25)%1-.5) if waveform=='triangle' else 2*((phase+.5)%1)-1 if waveform=='sawtooth' else sin(2*pi*phase)
+    if voltage_min is not None: return (voltage_max+voltage_min)/2+(voltage_max-voltage_min)/2*unit
+    return factor*rms*unit
+
+def source_voltage(parameters,time):
+    if parameters.get('sim_waveform')=='dc': return parameters['value']
+    limits=parameters.get('sim_voltage_mode')=='limits'
+    return ac_voltage(parameters['value'],parameters['sim_frequency'],time,parameters.get('sim_waveform','sine'),parameters.get('sim_voltage_min') if limits else None,parameters.get('sim_voltage_max') if limits else None)
 
 
 def si_value(text, unit, minimum=1e-15, maximum=1e15):
@@ -84,6 +98,8 @@ class _Circuit:
         self.netlist = build_netlist(sheet, custom)
         self.devices, errors = [], []
         board_sources = []
+        external_supply_nodes={self.netlist.pins[c.id,0] for c in sheet.components
+            if (m:=behavior_for(self.netlist.definitions[c.id])) and m.kind in {"dc","ac","rail_source","solar","lab_source"}}
         self.scripts = {}
         self.ground = None
         if not sheet.components: errors.append(self.t("The sheet is empty.", "Arkusz jest pusty."))
@@ -109,10 +125,12 @@ class _Circuit:
                     from app.simulation.python_board import PythonBoard
                     from app.simulation.gpio_script import gpio_alias
                     source=Path(c.properties.get("sim_source", ""))
-                    if not source.is_file():
+                    builtin=c.properties.get("sim_builtin_example")=="blink"
+                    if not builtin and not source.is_file():
                         raise ValueError(self.t("use Edit code in component properties first", "najpierw użyj Edytuj kod we właściwościach elementu"))
-                    if source.stat().st_size > 100000: raise ValueError("GPIO source too large")
-                    self.scripts[c.id]=PythonBoard(source.read_text(encoding="utf-8-sig"),d,source)
+                    if not builtin and source.stat().st_size > 100000: raise ValueError("GPIO source too large")
+                    text="import RPi.GPIO as GPIO\nimport time\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(17, GPIO.OUT)\nwhile True:\n    GPIO.output(17, 1)\n    time.sleep(.5)\n    GPIO.output(17, 0)\n    time.sleep(.5)\n" if builtin else source.read_text(encoding="utf-8-sig")
+                    self.scripts[c.id]=PythonBoard(text,d,None if builtin else source)
                     names=params["pins"]
                     if "GND" not in names: raise ValueError("Board has no GND pin")
                     params["ground"]=names["GND"]
@@ -127,6 +145,7 @@ class _Circuit:
                     for name,voltage in (("5V",5.),("VSYS",5.),("3V3",3.3),("3V",3.),("VDD",3.3),("AVDD",3.3)):
                         if name in names:
                             node=names[name]; active.add(node)
+                            if node==params["power"] and node in external_supply_nodes: continue
                             source_component=SimpleNamespace(id=c.id+":"+name,reference=c.reference+":"+name)
                             board_sources.append(Device(source_component,"rail_source",(node,self.ground),{"value":voltage}))
                     wired=set(self.netlist.wires.values())
@@ -149,6 +168,7 @@ class _Circuit:
                         for name,voltage in (("5V",5.),("3V3",3.3)):
                             if name in names:
                                 node=names[name]; allowed.add(node)
+                                if node==params["power"] and node in external_supply_nodes: continue
                                 source_component=SimpleNamespace(id=c.id+":"+name,reference=c.reference+":"+name)
                                 board_sources.append(Device(source_component,"rail_source",(node,self.ground),{"value":voltage}))
                     wired = set(self.netlist.wires.values())
@@ -158,10 +178,13 @@ class _Circuit:
                     nodes = tuple(sorted(allowed))
                 if model.primary_unit:
                     from app.core.component_defaults import nominal_value
-                    number, unit = parse_value(c.value or nominal_value(d)[0], c.unit or model.primary_unit)
-                    params["value"] = si_value(number + " " + unit, model.primary_unit)
+                    if model.kind=='ac' and c.properties.get('sim_voltage_mode')=='limits': params['value']=1.
+                    else:
+                        number, unit = parse_value(c.value or nominal_value(d)[0], c.unit or model.primary_unit)
+                        params["value"] = si_value(number + " " + unit, model.primary_unit,minimum=0 if model.kind=='lab_source' else 1e-15)
                 for p in model.parameters:
                     raw = str(c.properties.get(p.key, p.default))
+                    if p.choices and raw.lower() in {"true","false"}: raw=raw.lower()
                     if p.key == "sim_initial_voltage" and model.kind == "polar_capacitor" and raw.strip().lower() == "auto":
                         # Repeatable startup aid breaks ideal oscillator
                         # symmetry without waiting seconds for numerical noise.
@@ -171,15 +194,30 @@ class _Circuit:
                         fraction = int.from_bytes(sha256(c.id.encode()).digest()[:4], "big") / 0xffffffff
                         params[p.key] = (2*fraction-1)*.1
                         continue
-                    if p.choices:
+                    if p.key=='sim_address':
+                        from app.core.i2c_address import parse_address
+                        params[p.key]=parse_address(raw)
+                    elif p.choices:
                         if raw not in {v[0] for v in p.choices}: raise ValueError(self.t(p.en,p.pl))
                         params[p.key] = raw
                     else:
                         try: params[p.key] = si_value(raw, p.unit, p.minimum, p.maximum)
                         except ValueError as exc:
                             raise ValueError(self.t(p.en,p.pl)+": "+str(exc)) from exc
+                if model.kind=='ac' and params.get('sim_voltage_mode')=='limits' and params['sim_voltage_max']<=params['sim_voltage_min']:
+                    raise ValueError(self.t('Maximum voltage must exceed minimum','Napięcie maksymalne musi być większe od minimalnego'))
+                if model.kind=='variable_resistor' and params['sim_max_resistance']<=params['sim_min_resistance']:
+                    raise ValueError(self.t('Maximum resistance must exceed minimum resistance','Maksymalna rezystancja musi być większa od minimalnej'))
                 if model.kind in {"capacitor", "polar_capacitor"}:
                     params["voltage"] = si_value(c.properties.get("voltage", ""), "V")
+                if model.kind == "port_power":
+                    if params["sim_power"] != "true": continue
+                    names = params["pins"]
+                    positive = next(node for name, node in names.items() if name.startswith("VBUS") or name == "POWER")
+                    negative = next(node for name, node in names.items() if name.startswith("GND"))
+                    nodes = (positive, negative)
+                    params["value"] = params["sim_voltage"]
+                    model = replace(model, kind="dc")
                 if model.kind == "led" and not color_key(c.properties.get("color", "")):
                     raise ValueError(self.t("choose LED colour", "wybierz kolor LED"))
                 if model.kind == "rail_source":
@@ -188,13 +226,19 @@ class _Circuit:
                     params["logic_input"] = True
                     params["value"] = 5.0 if params["sim_closed"] == "true" else 0.0
                     model = replace(model, kind="rail_source")
+                if model.kind == "solar":
+                    params["solar"] = True
+                    params["value"] = params["sim_open_voltage"] * params["sim_light"]
+                    model = replace(model, kind="dc")
             except (ValueError, OverflowError, OSError, SyntaxError) as exc:
                 errors.append(label+": "+self.t("missing/invalid parameters", "brak lub błędne parametry")+f" ({exc})")
                 continue
             initial = params.get("sim_initial_voltage", 0.0)
-            self.devices.append(Device(c, model.kind, nodes, params, previous=initial, closed=params.get("sim_closed") == "true"))
+            self.devices.append(Device(c, model.kind, nodes, params, previous=initial,
+                closed=False if model.kind in {"tactile", "joystick"} else params.get("sim_closed") == "true"))
+            if model.kind == "keypad": params["sim_key"] = "none"
         self.devices.extend(board_sources)
-        self.sources = [d for d in self.devices if d.kind in {"dc", "ac", "rail_source"}]
+        self.sources = [d for d in self.devices if d.kind in {"dc", "ac", "rail_source",'lab_source'}]
         logical = any(d.kind in {"logic_gate", "logic_output"} or d.parameters.get("logic_input") for d in self.devices)
         if self.ground is None and logical: self.ground = -1
         for device in self.devices:
@@ -291,7 +335,7 @@ class _Circuit:
         if not isfinite(dt) or not 1e-10 <= dt <= .01:
             raise SimulationError("Time step must be 0.1 ns … 10 ms")
         for d in self.sources:
-            if d.kind == "ac" and dt*d.parameters["sim_frequency"] > .02:
+            if d.kind in {"ac", "inverter",'lab_source'} and d.parameters.get('sim_waveform')!='dc' and dt*d.parameters["sim_frequency"] > .02:
                 raise SimulationError(self.t("AC needs 50+ time steps per period; lower the time step.",
                                              "AC wymaga min. 50 kroków na okres; zmniejsz krok czasowy."))
         for d in self.devices:
@@ -319,16 +363,19 @@ class _Circuit:
             matrix, rhs = [[0.0]*size for _ in range(size)], [0.0]*size
             def inject(a, b, g, offset=0):
                 # I(a→b) = g*(Va-Vb)+offset. Źródło prądowe trafia do RHS.
-                for node, other, sign in ((a,b,1), (b,a,-1)):
-                    if node in self.index:
-                        i = self.index[node]
-                        matrix[i][i] += g
-                        if other in self.index: matrix[i][self.index[other]] -= g
-                        rhs[i] -= sign*offset
+                i, j = self.index.get(a), self.index.get(b)
+                if i is not None:
+                    matrix[i][i] += g
+                    if j is not None: matrix[i][j] -= g
+                    rhs[i] -= offset
+                if j is not None:
+                    matrix[j][j] += g
+                    if i is not None: matrix[j][i] -= g
+                    rhs[j] += offset
             stamps, extended_stamps = {}, {}
             for d in self.devices:
                 p = d.parameters
-                if d.kind in {"dc", "ac", "rail_source"}: continue
+                if d.kind in {"dc", "ac", "rail_source",'lab_source'}: continue
                 if d.kind not in basic:
                     branches,trial=linearize(d,volts_guess,self.ground,new_time,dt)
                     extended_stamps[d.component.id]=(branches,trial)
@@ -349,7 +396,7 @@ class _Circuit:
                     for name,node in p["gpio"].items():
                         if node not in self.index: continue
                         state = states.get(name,2)
-                        g = 1/25 if state in {0,1} else 1/50000 if state == 3 else 1e-12
+                        g = 1/25 if state in {0,1} else 1/50000 if state in {3,4} else 1e-12
                         level = (p["logic_voltage"] if d.kind=="mcu_gpio" else p["profile"].voltage) if state in {1,3} else 0
                         inject(node,p["ground"],g,-g*level)
                     continue
@@ -376,7 +423,14 @@ class _Circuit:
                         matrix[row][i] += sign
                         matrix[i][row] += sign
                 value = d.parameters["value"]
-                rhs[row] = value if d.kind in {"dc", "rail_source"} else sqrt(2)*value*sin(2*pi*d.parameters["sim_frequency"]*new_time)
+                rhs[row] = value if d.kind in {"dc", "rail_source"} else source_voltage(d.parameters,new_time)
+                if d.kind=='lab_source':
+                    voltage=rhs[row]; limit=d.parameters['sim_max_current']
+                    if voltage and guess[row]*voltage<0 and abs(guess[row])>=limit*(1-1e-8):
+                        # Compliance mode fixes source current rather than voltage.
+                        for node in d.nodes:
+                            if node in self.index: matrix[row][self.index[node]]=0
+                        matrix[row][row]=1.; rhs[row]=-limit if voltage>0 else limit
             # Gmin jest WYŁĄCZNIE metodą szukania punktu pracy. Każdy
             # zaakceptowany wynik musi ponownie spełnić oryginalne równania
             # z continuation=0, bez sztucznego obciążania obwodu.
@@ -387,7 +441,7 @@ class _Circuit:
         # przy NOWYCH napięciach. Sam brak zmiany flagi diody nie wystarcza
         # dla tranzystorów, wzmacniaczy i kilku zależnych bramek.
         def residual(candidate, matrix, rhs):
-            return max((abs(sum(a*x for a,x in zip(row,candidate))-b) for row,b in zip(matrix,rhs)),default=0)
+            return max((abs(sumprod(row,candidate)-b) for row,b in zip(matrix,rhs)),default=0)
         guess=[self.result.voltages.get(n,0) for n in self.index]+[0.0]*len(self.sources)
         # Zgadnięcie punktu pracy musi już spełniać znane idealne zasilania.
         # Inaczej tłumienie Newtona utkwi na progu włączania zasilanego IC.
@@ -396,7 +450,7 @@ class _Circuit:
             for d in self.sources:
                 a,b=d.nodes
                 value=d.parameters["value"]
-                if d.kind=="ac": value*=sqrt(2)*sin(2*pi*d.parameters["sim_frequency"]*new_time)
+                if d.kind in {'ac','lab_source'}: value=source_voltage(d.parameters,new_time)
                 if b in known: known[a]=known[b]+value
                 elif a in known: known[b]=known[a]-value
         for node,value in known.items():
@@ -539,6 +593,43 @@ def loose_component_ids(sheet,custom=(),netlist=None):
     return ignored
 
 
+class _MeasurementCircuit:
+    """Unpowered passive island: meter computes resistance without external power."""
+    def __init__(self,sheet,custom,language):
+        self.sheet=sheet; self.custom=custom; self.language=language
+        self.netlist=build_netlist(sheet,custom); self.devices=[]; self.sources=[]; self.scripts={}; self.gpio_states={}
+        self.time=0.; self.result=Result(); self.index={}; self.ground=0
+        for c in sheet.components:
+            definition=self.netlist.definitions[c.id]; model=behavior_for(definition)
+            if model.kind in {"ground","connector"}: continue
+            nodes=tuple(self.netlist.pins[c.id,i] for i in range(len(definition.pins)))
+            params={p.key:c.properties.get(p.key,p.default) for p in model.parameters}; params.update(c.properties)
+            if model.primary_unit:
+                params["value"]=si_value(c.value+" "+c.unit,model.primary_unit)
+            self.devices.append(Device(c,model.kind,nodes,params,closed=str(c.properties.get("sim_closed","")).lower()=="true"))
+    def validate_time_step(self,dt):
+        if not isfinite(dt) or not 1e-10<=dt<=.01: raise SimulationError("Invalid time step")
+    def step(self,dt=.0001):
+        from app.simulation.measurements import resistance
+        self.time+=dt; self.result=Result(self.time,{n:0. for n in self.netlist.pins.values()})
+        for d in self.devices:
+            self.result.currents[d.component.id]=0.
+            definition=self.netlist.definitions[d.component.id]
+            if definition.name in {"Omomierz","Tester ciągłości"}:
+                try:
+                    value=resistance(self.sheet,self.custom,self.netlist,*d.nodes[:2],self.devices)
+                    from app.core.units import format_si
+                    self.result.readings[d.component.id]=format_si(value,"Ω")
+                except ValueError: self.result.readings[d.component.id]="OL"
+        return self.result
+
+
+def _measurement_island(sheet,custom):
+    models=[behavior_for(get_definition(c.library_id,custom)) for c in sheet.components]
+    allowed={"resistor","variable_resistor","lamp","led","diode","dc_motor","potentiometer","switch","tactile","spdt","multi_switch","inductor","capacitor","polar_capacitor","connector","ground","meter","ammeter"}
+    return bool(models) and all(m and m.kind in allowed for m in models)
+
+
 class Circuit:
     """Independent electrical islands share a clock, not a reference node.
 
@@ -546,6 +637,9 @@ class Circuit:
     or USB-powered circuits can have their own reference and fault state.
     """
     def __init__(self, sheet, custom=(), language="en"):
+        from app.core.assets import expand_assets, with_asset_dependencies
+        custom=with_asset_dependencies(custom)
+        sheet=expand_assets(sheet,list(custom))
         self.sheet, self.language = sheet, language
         self.netlist = build_netlist(sheet, custom)
         components={c.id:c for c in sheet.components}
@@ -586,7 +680,7 @@ class Circuit:
             nets={net for (cid,_),net in self.netlist.pins.items() if cid in ids}
             subset=replace(sheet,components=[c for c in sheet.components if c.id in ids],
                            wires=[w for w in sheet.wires if self.netlist.wires[w.id] in nets])
-            try: part=_Circuit(subset,custom,language)
+            try: part=_MeasurementCircuit(subset,custom,language) if _measurement_island(subset,custom) else _Circuit(subset,custom,language)
             except SimulationError as exc:
                 from app.core.messages import localize
                 raise SimulationError(("Obwód: " if language=="pl" else "Circuit: ")+localize(str(exc),language)) from exc
@@ -629,7 +723,7 @@ class Circuit:
         """Sampling-safe limit with headroom for the UI's decimal rounding."""
         limit=.01
         for device in self.active_devices():
-            if device.kind=="ac": limit=min(limit,.019/device.parameters["sim_frequency"])
+            if device.kind in {"ac", "inverter",'lab_source'} and device.parameters.get('sim_waveform')!='dc': limit=min(limit,.019/device.parameters["sim_frequency"])
             elif device.kind=="crystal": limit=min(limit,.019/device.parameters["value"])
         return limit
 

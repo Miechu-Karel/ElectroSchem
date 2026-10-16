@@ -6,7 +6,7 @@ wraca emiterem, a obciążenie wyjścia bramki jest pobierane z jej zasilania.
 Stan trwały zapisujemy WYŁĄCZNIE po zbieżnym kroku, nie przy każdej iteracji.
 """
 from dataclasses import dataclass, field
-from math import exp, pi
+from math import exp, pi, sin, sqrt
 from app.simulation.spi_devices import mcp3008, mcp41010
 
 
@@ -34,6 +34,9 @@ def logic(function, bits):
 
 def linearize(d, volts, ground, time, dt):
     """Buduje gałęzie według przybliżenia napięć, bez zmieniania dokumentu."""
+    if d.kind == 'catalog_ic':
+        from app.simulation.alpha139_ic import linearize as ic_linearize
+        return ic_linearize(d,volts,ground,time,dt)
     p, n, kind = d.parameters, d.parameters["pins"], d.kind
     branches = []
     trial = dict(d.state)
@@ -61,6 +64,10 @@ def linearize(d, volts, ground, time, dt):
     elif kind == "potentiometer":
         resistor(n["1"], n["W"], p["value"]*p["sim_position"])
         resistor(n["W"], n["3"], p["value"]*(1-p["sim_position"]))
+    elif kind == "variable_resistor":
+        low=float(p["sim_min_resistance"]); high=float(p["sim_max_resistance"])
+        if high < low: low,high=high,low
+        resistor(*d.nodes,low+(high-low)*float(p["sim_position"]))
     elif kind == "zener":
         a,b=d.nodes
         if v(a,b) < -p["sim_breakdown"]: branch(a,b,.1,.1*p["sim_breakdown"])
@@ -126,6 +133,17 @@ def linearize(d, volts, ground, time, dt):
     elif kind == "spdt":
         contact(n["COM"],n["A"],not d.closed)
         contact(n["COM"],n["B"],d.closed)
+    elif kind == "multi_switch":
+        position=int(p['sim_position'])
+        if position==0 and p.get('sim_allow_off','true')=='false': position=1
+        for i in range(1, int(p["sim_outputs"])+1): contact(n["COM"], n[str(i)], position == i)
+    elif kind in {"meter", "ammeter", "dc_motor", "usb_keyboard"}:
+        a,b = (n["VBUS"], n["GND"]) if kind == "usb_keyboard" else d.nodes[:2]
+        resistance = .001 if kind == "ammeter" else p["sim_resistance"] if kind == "dc_motor" else 5/p["sim_load_current"] if kind == "usb_keyboard" else 1e12
+        resistor(a,b,resistance)
+        if kind == "usb_keyboard":
+            trial["powered"]=v(a,b)>=4
+            for pin in (n["D−"], n["D+"]): resistor(pin,b,1e12)
     elif kind == "relay":
         resistor(n["COIL+"],n["COIL−"],p["sim_coil_resistance"])
         threshold=p["sim_pickup"]*(.5 if d.state.get("on") else 1)
@@ -188,7 +206,7 @@ def linearize(d, volts, ground, time, dt):
             drive(n[f"{i}Y"],low,high,logic(func,bits),enabled)
     elif kind == "regulator":
         high,low,out=n["IN"],n["GND"],n["OUT"]
-        target=3.3 if "1117" in p["name"] else 12 if "7812" in p["name"] else 5
+        target=p.get("sim_output_voltage", 3.3 if "1117" in p["name"] else 12 if "7812" in p["name"] else 5)
         vin=v(high,low)
         level=max(0,min(target,vin-p["sim_dropout"]))
         g=10
@@ -320,20 +338,63 @@ def linearize(d, volts, ground, time, dt):
         branch(high,low,1e-12)
         trial.update(phase=phase,step=step)
         trial["unsupported_mode"]=any(v(n[label],low)>v(supply,low)*.5 for label in ("MS1","MS2","MS3") if label in n)
-    elif kind == "converter":
-        high,low,out,return_pin=n["IN+"],n["IN−"],n["OUT+"],n["OUT−"]
+    elif kind == "rectifier":
+        for ac in (n["AC+"], n["AC-"]):
+            diode(ac, n["DC+"], .7)
+            diode(n["DC-"], ac, .7)
+    elif kind in {"comparator", "quad_opamp"}:
+        high, low = n["VCC"], n["GND"]
+        enabled = powered(high, low)
+        for i in range(1, 5 if kind == "quad_opamp" else 3):
+            plus, minus, out = n[f"{i}IN+"], n[f"{i}IN−"], n[f"{i}OUT"]
+            inputs([plus, minus], low)
+            if kind == "comparator":
+                branch(out, low, .04 if enabled and v(plus, minus) < 0 else 1e-12)
+            else:
+                gain = p["sim_gain"]
+                level = gain*v(plus, minus)
+                if 0 < level < v(high, low) and enabled:
+                    branch(out, low, .04, 0, {plus:-.04*gain, minus:.04*gain})
+                else:
+                    drive(out, low, high, level>0, enabled)
+    elif kind == "analog_switch":
+        high, low = n["VDD"], n["VSS"]
+        enabled = powered(high, low)
+        inputs([n[label+str(index)] for label in "ABCD" for index in (1,2)], low)
+        for label in "ABCD":
+            inputs([n["EN."+label]], low)
+            branch(n[label+"1"], n[label+"2"], 1/p["sim_on_resistance"] if enabled and v(n["EN."+label],low) > v(high,low)*.5 else 1e-12)
+    elif kind == "parallel_dac":
+        high, low = n["VCC"], n["GND"]
+        enabled = powered(high, low)
+        bits = sum(f"D{i}" in n for i in range(16))
+        inputs([n["VREF"], *(n[f"D{i}"] for i in range(bits))], low)
+        code = sum(1<<i for i in range(bits) if v(n[f"D{i}"],low) > v(high,low)*.5)
+        denominator = (1<<bits)-1
+        branch(n["OUT"], low, .04, 0, {n["VREF"]:-.04*code/denominator, low:.04*code/denominator} if enabled else {})
+        trial["code"] = code
+    elif kind in {"converter", "inverter"}:
+        if kind == "inverter":
+            high,low,out,return_pin=n["DC+"],n["DC-"],n["AC+"],n["AC-"]
+        else:
+            high,low,out,return_pin=n["IN+"],n["IN−"],n["OUT+"],n["OUT−"]
         contact(low,return_pin,True)
         vin=v(high,low)
         target=p["sim_output_voltage"]
-        if "LM2596" in p["name"]: target=min(target,max(0,vin))
+        name = p["name"]
+        if kind == "inverter":
+            target = min(target, max(0,vin)/sqrt(2))*sqrt(2)*sin(2*pi*p["sim_frequency"]*time)
+        elif "Step-Up/Step-Down" in name:
+            target = target if vin>0 else 0
+        elif "LM2596" in name or "Step-Down" in name: target=min(target,max(0,vin))
         elif vin>0: target=max(target,vin)
         else: target=0
         g=10 if vin>1 else 1e-12
         output=branch(out,return_pin,g,-g*target)
         # Zachowujemy moc wejściową w punkcie pracy. Pochodne są po
         # napięciu wyjścia, wejścia i prądzie obciążenia (Jacobian Newtona).
-        current=max(0,-output.current(volts))
-        if vin>1 and current>0:
+        current=-output.current(volts)
+        if vin>1 and v(out,return_pin)*current>0:
             vo=v(out,return_pin)
             efficiency=p["sim_efficiency"]
             power=vo*current
@@ -342,7 +403,7 @@ def linearize(d, volts, ground, time, dt):
             din=-desired/vin
             branch(high,low,0,desired-dout*vo-din*vin,{out:dout,return_pin:-dout,high:din,low:-din})
         else: branch(high,low,1e-12)
-        trial["output_current"]=current
+        trial["output_current"]=abs(current)
     elif kind == "level_converter":
         low=d.nodes[1]
         contact(low,d.nodes[7],True)
@@ -423,10 +484,24 @@ def linearize(d, volts, ground, time, dt):
 
 def finish(d, branches, trial, volts, result, dt, translate):
     """Wylicza pomiary z zaakceptowanej sieci, zatwierdza pamięć modelu."""
+    if d.kind == 'catalog_ic':
+        from app.simulation.alpha139_ic import finish as ic_finish
+        return ic_finish(d,branches,trial,volts,result,dt,translate)
     p,kind,cid=d.parameters,d.kind,d.component.id
     currents=[b.current(volts) for b in branches]
     result.currents[cid]=currents[0] if currents else 0
     fault=""
+    if kind in {"meter", "ammeter", "dc_motor", "usb_keyboard", "multi_switch"}:
+        a,b = (p["pins"]["VBUS"], p["pins"]["GND"]) if kind == "usb_keyboard" else d.nodes[:2]
+        voltage = volts.get(a,0)-volts.get(b,0)
+        if kind == "ammeter": result.readings[cid] = f"{currents[0]:.6g} A"
+        elif kind == "dc_motor":
+            result.readings[cid] = translate("Rotation", "Obroty")+f": {voltage/p['sim_rated_voltage']:+.0%}"
+            if abs(voltage)>6.6 or abs(currents[0])>p["sim_max_current"]:
+                fault=translate("Motor overloaded", "Przeciążenie silnika")
+        elif kind == "usb_keyboard": result.readings[cid] = translate("Powered", "Zasilana") if voltage>4 else translate("No power", "Brak zasilania")
+        elif kind == "multi_switch": result.readings[cid] = "COM → "+str(1 if int(p['sim_position'])==0 and p.get('sim_allow_off','true')=='false' else p['sim_position'])
+        else: result.readings[cid] = f"{voltage:.6g} V"
     if kind in {"npn","pnp","nmos","pmos"} and abs(currents[0])>p["sim_max_current"]:
         fault=translate("Transistor current limit exceeded", "Przekroczony limit prądu tranzystora")
     if kind == "zener":
@@ -488,7 +563,7 @@ def finish(d, branches, trial, volts, result, dt, translate):
         fault=translate("Regulator output overcurrent","Przeciążenie wyjścia stabilizatora")
     if kind=="adc_spi" and "spi_code" in trial: result.readings[cid]=f"ADC: {trial['spi_code']} / 1023"
     if kind=="digital_pot": result.readings[cid]=f"W: {trial['wiper']} / 256"
-    if kind == "converter" and trial.get("output_current",0)>p["sim_max_current"]:
+    if kind in {"converter", "inverter"} and trial.get("output_current",0)>p["sim_max_current"]:
         fault=translate("Converter output overcurrent","Przeciążenie wyjścia przetwornicy")
     if kind == "stepper_driver":
         if trial.get("unsupported_mode"):

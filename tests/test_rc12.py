@@ -41,7 +41,7 @@ class Rc12Tests(unittest.TestCase):
         self.assertTrue(dialog.ai_consent.isChecked())
         dialog.ai_consent.setChecked(False)
         dialog._accept()
-        self.assertTrue(dialog.result_settings().ai_chat_consent)  # rc14 zachowuje ukryte preferencje
+        self.assertFalse(dialog.result_settings().ai_chat_consent)
         dialog.deleteLater()
 
     def test_standard_yes_no_buttons_follow_application_language(self):

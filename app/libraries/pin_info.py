@@ -10,6 +10,8 @@ def pin_explanation(definition, pin, language="en"):
     pl=language=="pl"
     def t(en,polish): return polish if pl else en
     name,symbol,label=definition.name,definition.symbol,pin.name
+    from app.libraries.usb_info import is_usb_port,pin_role
+    if is_usb_port(definition): return pin_role(pin,language)
     if label in {"GND","VSS"}:
         return t("Ground: supply return and signal reference.","Masa: powrót zasilania i punkt odniesienia sygnałów.")
     if label in {"VCC","VDD","3V3","3.3V","5V"}:

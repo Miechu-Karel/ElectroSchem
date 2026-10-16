@@ -1,5 +1,21 @@
 """Tłumaczenia opisów biblioteki; nazwy sygnałów i treść użytkownika zostają bez zmian."""
 PL = {
+    'Mini breadboard: 10 rows, two independent banks of five connected holes; two independent continuous power rails. Female jumper contacts only.':'Mini płytka stykowa: 10 rzędów, dwa niezależne banki po pięć połączonych otworów i dwie niezależne ciągłe szyny boczne. Otwory dla męskich końcówek kabelków.',
+    'Educational CV/CC source; editable output voltage, current limit, frequency and waveform':'Edukacyjny zasilacz CV/CC; ustawiane na żywo napięcie, limit prądu, częstotliwość i kształt fali',
+    'Single female plug contact and PCB end, internally connected':'Pojedynczy żeński styk kabla i końcówka PCB, połączone wewnętrznie',
+    'Movable single-conductor jumper plugs; opposite-gender Goldpin contacts only':'Ruchome końcówki przewodu połączeniowego; pasują do goldpinów przeciwnej płci',
+    "One pole, 1–10 selectable outputs (six by default) and OFF; ideal break-before-make contacts": "Jeden tor, 1–10 wybieranych wyjść (domyślnie sześć) i wyłączenie; idealne styki rozłączane przed załączeniem następnego",
+    "One pole, six selectable throws and OFF; break-before-make ideal contacts": "Jeden tor, sześć wybieranych styków i wyłączenie; idealne styki rozłączane przed załączeniem następnego",
+    "One conducting pin with separate top (plug) and bottom (PCB) ends; repeat to build a header": "Jeden przewodzący pin z osobnymi końcami górnym (wtyk) i dolnym (PCB); powielaj, aby zbudować listwę",
+    "USB 2.0 cable: A/B identify ends, not connector types. Matching conductors joined; no protocol or PD negotiation": "Kabel USB 2.0: A/B oznaczają końce, nie rodzaje złączy. Odpowiadające przewody połączone; bez protokołu i negocjacji PD",
+    "Educational regulated DC output; input mains and USB fast-charge negotiation not modelled": "Edukacyjne stabilizowane wyjście DC; bez modelu wejścia sieciowego i negocjacji szybkiego ładowania USB",
+    "USB-powered keyboard with simulated console text input; no USB enumeration/HID packets": "Klawiatura zasilana przez USB z wejściem tekstowym symulowanej konsoli; bez enumeracji USB i pakietów HID",
+    "Generic resistive DC motor envelope, indicative rotation only. Winding resistance is configurable, not measured MT64 data": "Ogólny rezystancyjny model silnika DC i wskaźnik obrotów. Rezystancja uzwojenia ustawiana przez użytkownika, nie zmierzone dane MT64",
+    "Educational two-terminal instrument: V": "Edukacyjny przyrząd dwuzaciskowy: V",
+    "Educational two-terminal instrument: A": "Edukacyjny przyrząd dwuzaciskowy: A",
+    "Educational two-terminal instrument: Ω": "Edukacyjny przyrząd dwuzaciskowy: Ω",
+    "Educational two-terminal instrument: •": "Edukacyjny przyrząd dwuzaciskowy: ciągłość",
+    "Educational two-terminal instrument: ~": "Edukacyjny przyrząd dwuzaciskowy: przebieg",
     "Local host-camera preview abstraction, not a physical USB/CSI pinout or camera protocol emulator": "Model lokalnego podglądu kamery urządzenia; nie układ pinów USB/CSI ani emulator protokołu kamery",
     "Grove I2C connector; signal order, not package pin numbering": "Złącze Grove I2C; kolejność sygnałów, nie numeracja obudowy",
     "Two potentiometers and push switch; verify header order": "Dwa potencjometry i przycisk; sprawdź kolejność pinów złącza",
@@ -103,9 +119,36 @@ PL = {
 }
 
 
+PL.update({
+    "USB 2.0 semantic contacts and shell; no USB host, enumeration or data protocol": "Styki USB 2.0 i ekran; bez hosta USB, enumeracji i protokołu transmisji",
+    "Full USB-C semantic contacts; no PD negotiation or internal contacts assumed": "Pełny zestaw sygnałów USB-C; bez negocjacji PD i domyślnych połączeń wewnętrznych",
+    "Educational semantic connector; orientation switching and authentication are not emulated": "Edukacyjne złącze sygnałowe; bez przełączania orientacji i uwierzytelniania",
+    "Generic four-diode bridge; add an external filter capacitor": "Ogólny mostek czterodiodowy; dodaj zewnętrzny kondensator filtrujący",
+    "Non-isolated educational sine inverter; not a mains wiring diagram": "Nieizolowany edukacyjny falownik sinusoidalny; nie schemat instalacji sieciowej",
+    "Generic averaged non-isolated DC converter": "Ogólna uśredniona nieizolowana przetwornica DC",
+    "Generic educational three-terminal regulator": "Ogólny edukacyjny stabilizator trójkońcówkowy",
+    "Illumination-scaled ideal DC source with a configurable current limit; no photovoltaic IV-curve": "Idealne źródło DC zależne od oświetlenia z ustawianym limitem prądu; bez krzywej IV ogniwa",
+    "Generic parallel 8-bit DAC, straight binary; not a specific package": "Ogólny równoległy DAC 8-bit, naturalny kod binarny; nie konkretna obudowa",
+    "PDIP-8 / SOIC-8; dual open-collector comparator": "PDIP-8 / SOIC-8; dwa komparatory z otwartym kolektorem",
+    "PDIP-14 / SOIC-14; four amplifiers, GND labels VCC−": "PDIP-14 / SOIC-14; cztery wzmacniacze, GND oznacza VCC−",
+    "PDIP-14 / SOIC-14; four independent bilateral switches": "PDIP-14 / SOIC-14; cztery niezależne klucze dwukierunkowe",
+    "Grove I2C connector; 3.3/5 V module supply; register/motion model to be defined": "Złącze Grove I2C; zasilanie modułu 3,3/5 V; model rejestrów i ruchu do ustalenia",
+    "Passive RF card, no wired terminals; click to present/remove it at the nearest RC522": "Pasywna karta RF, bez styków przewodowych; kliknij, aby przedstawić lub usunąć ją przy najbliższym RC522",
+    "Passive RF card, no wired terminals; drag near RC522 to present its configured ID": "Pasywna karta RF, bez styków przewodowych; przeciągnij do RC522, aby przedstawić ustawione ID",
+})
+
+
 def catalog_text(text, language):
     if language != "pl":
         return text
+    if text=='Pins of the specified package; verify suffix and exposed pads before hardware use':
+        return 'Piny wskazanej obudowy; sprawdź przyrostek oznaczenia i pola odsłonięte przed użyciem sprzętu'
+    from app.libraries.alpha139_parts import SPECS
+    if any(text==value[2] for value in SPECS.values()):
+        return 'Obudowa / wariant: '+text.replace('front view','widok z przodu').replace('front/flat face pin order','kolejność pinów od płaskiej strony').replace('not drawn','nie narysowano').replace('not RTC module','nie moduł RTC').replace('bare chip','sam scalak').replace('verify suffix','sprawdź przyrostek').replace('pin 7 differs by suffix','pin 7 zależy od przyrostka').replace('not QFN numbering','nie numeracja QFN').replace('not DFN','nie DFN').replace('G variant','wariant G').replace('perimeter pins','piny na obwodzie').replace('ground pad','pole masy').replace('classic','klasyczny').replace('family','rodzina').replace('tab =','pole chłodzące =').replace('PowerPAD to','PowerPAD do')
+    for bits in (10, 12):
+        if text == f"Generic parallel {bits}-bit DAC, straight binary; not a specific package":
+            return f"Ogólny równoległy DAC {bits}-bit, naturalny kod binarny; nie konkretna obudowa"
     if text.startswith("Standard ") and text.endswith(" Gate schematic symbol"):
         return "Standardowy symbol bramki " + text[9:-22]
     if " logic, " in text:

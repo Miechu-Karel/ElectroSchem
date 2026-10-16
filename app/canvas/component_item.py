@@ -15,6 +15,15 @@ from app.libraries.built_in import get_definition, item_name, LibraryItem, PinSp
 from app.core.led_colors import color_label
 
 GRID_STEP = 20
+CABLE_NAMES={'Kabel USB','Kabel Męsko-Żeński','Kabel Żeńsko-Żeński','Kabel Męsko-Męski'}
+
+
+def bottom_sockets(definition):
+    return "Arduino" in definition.name or "Raspberry Pi" in definition.name or definition.name.startswith("Port USB") or definition.name=="Port Lightning"
+
+def socket_strip(definition,rect):
+    top=definition.name.startswith(("Port USB","Port Lightning")) and definition.pins and all(pin.y==definition.height/2 for pin in definition.pins)
+    return rect.adjusted(0,-40,0,0) if top else rect.adjusted(0,0,0,40)
 
 
 class ComponentItem(QGraphicsObject):
@@ -25,7 +34,11 @@ class ComponentItem(QGraphicsObject):
         self.component = component
         self.on_position_changed = None
         self.language, self.standard = language, standard
-        self.definition = get_definition(component.library_id, custom_components)
+        self.asset_case=next((raw.get('asset',{}).get('case') for raw in (custom_components or []) if raw.get('id')==component.library_id),None)
+        self.asset_payload=next((raw.get('asset') for raw in (custom_components or []) if raw.get('id')==component.library_id),None)
+        from app.libraries.built_in import get_instance_definition
+        try: self.definition = get_instance_definition(component, custom_components)
+        except ValueError: self.definition=get_definition(component.library_id,custom_components)
         if self.definition is None:
             # Brak definicji nie kasuje elementu starego projektu. Pozostaje
             # czytelny blok oznaczony ?, zamiast niewidocznej instancji.
@@ -56,7 +69,25 @@ class ComponentItem(QGraphicsObject):
         # Zapas obejmuje również podpis obrócony wokół narożnika. Nie wpływa
         # to na pole zaznaczenia (shape() używa dokładnego _hit_rect), ale
         # chroni QGraphicsView przed obcięciem/artefaktami po odświeżeniu.
-        return self._hit_rect.adjusted(-10, -10, 10, 10)
+        rect=self._hit_rect.adjusted(-10, -10, 10, 10)
+        if self.asset_case:
+            from app.canvas.case_shapes import outline
+            body,strokes=outline(self.asset_case['shapes'])
+            rect=rect.united(body.boundingRect().adjusted(-10,-10,10,10)).united(strokes.boundingRect())
+            for pin in self.definition.pins: rect=rect.united(QRectF(pin.x-10,pin.y-15,90,30))
+        if self.definition.name in CABLE_NAMES:
+            a,b=self.cable_points()
+            rect=rect.united(QRectF(a,b).normalized().adjusted(-30,-30,30,110))
+        return rect
+
+    def cable_points(self):
+        prefix='usb_' if self.definition.name=='Kabel USB' else 'jumper_'
+        def coordinate(key,default):
+            try:
+                number=float(self.component.properties.get(key,default))
+                return number if math.isfinite(number) and abs(number)<1e6 else default
+            except (ValueError,TypeError): return default
+        return tuple(QPointF(coordinate(prefix+side+'_x',x),coordinate(prefix+side+'_y',0)) for side,x in (('a',-75),('b',75)))
 
     @staticmethod
     def symbol_rect(definition):
@@ -68,7 +99,7 @@ class ComponentItem(QGraphicsObject):
         """
         rectangles = {
             **{key: (-40, -20, 80, 40) for key in (
-                "resistor", "capacitor", "polar_capacitor", "inductor",
+                "resistor", "variable_resistor", "capacitor", "polar_capacitor", "inductor",
                 "crystal", "diode", "zener", "schottky", "led", "thermistor",
                 "buzzer", "npn", "pnp", "nmos", "pmos", "switch", "spdt")},
             "potentiometer": (-40, -40, 80, 60),
@@ -81,6 +112,11 @@ class ComponentItem(QGraphicsObject):
             "rgb": (-80, -60, 160, 120), "motor": (-80, -40, 160, 80),
             "logic_input": (-20, -20, 60, 40),
             "logic_output": (-40, -20, 60, 40),
+            "meter": (-40, -20, 80, 40),
+            "match": (-60, -40, 120, 80),
+            "ultrasonic_target": (-60, -40, 120, 80),
+            "motion_target": (-40, -60, 80, 120),
+            "ir_remote": (-40, -80, 80, 160),
         }
         if definition.symbol.startswith("gate_"):
             return QRectF(-20, -20, 40, 40)
@@ -94,6 +130,8 @@ class ComponentItem(QGraphicsObject):
     @classmethod
     def selection_rect(cls, definition, show_name=True, show_values=True):
         rect = cls.symbol_rect(definition)
+        if bottom_sockets(definition):
+            return socket_strip(definition,rect)
         if definition.symbol in {"module", "ic", "connector"}:
             return rect
         # Oddzielne rzędy siatki na tekst, poza przewodami i obrysem symbolu.
@@ -108,6 +146,7 @@ class ComponentItem(QGraphicsObject):
 
     def pin_positions(self):
         # Rotacja rodzica jest uwzględniona także dla końców przewodów.
+        if self.definition.name in {"Kabel USB","Kostka zasilająca USB","Klawiatura USB"}: return []
         return [self.mapToScene(QPointF(pin.x, pin.y)) for pin in self.definition.pins]
 
     def update_labels(self):
@@ -129,6 +168,7 @@ class ComponentItem(QGraphicsObject):
         # parametru (np. napięcia). Usuwamy go dopiero, gdy żaden z tych
         # napisów nie jest widoczny, również gdy jego treść jest pusta.
         new_rect, self._name_rect, self._value_rect = self._layout_labels()
+        if self.asset_case and self.asset_case.get('selection_rect'): new_rect=QRectF(*self.asset_case['selection_rect'])
         if new_rect != self._hit_rect:
             # Qt musi poznać zmianę obwiedni PRZED przypisaniem nowej wartości.
             # Stary pas zostaje odmalowany i znika z hit-testów; symbol,
@@ -145,6 +185,9 @@ class ComponentItem(QGraphicsObject):
 
     def _visible_values(self):
         values = [self.value_text.strip()] if self.show_value and self.value_text.strip() else []
+        if self.show_value and self.component.properties.get('sim_voltage_mode') == 'limits':
+            p = self.component.properties
+            values = [f"{p.get('sim_voltage_min', '-5 V')} … {p.get('sim_voltage_max', '5 V')}"]
         if self.extra_text.strip():
             values.append(self.extra_text.strip())
         return " / ".join(values)
@@ -159,6 +202,7 @@ class ComponentItem(QGraphicsObject):
         core = QRectF(self._symbol_rect)
         symbol = self.definition.symbol
         if symbol in {"module", "ic", "connector"}:
+            if bottom_sockets(self.definition): core=socket_strip(self.definition,core)
             return core, QRectF(), QRectF()  # Tytuł jest częścią korpusu modułu.
         # Bezpieczne zakresy Y po uwzględnieniu grubości pióra symbolu.
         free = {
@@ -229,11 +273,32 @@ class ComponentItem(QGraphicsObject):
 
     def _module(self, p):
         d, r = self.definition, self._hit_rect
+        if bottom_sockets(d): r=self._symbol_rect
         top_pins = any(abs(pin.y-r.top()) < .1 for pin in d.pins)
         body = r.adjusted(20, 20 if top_pins or len(d.pins)>8 else 0, -20, -20)
         p.setBrush(QColor(getattr(self, "paper_color", "#ffffff")))
         p.drawRect(body)
         p.setBrush(Qt.BrushStyle.NoBrush)
+        if d.name == "Czujnik Płomienia":
+            p.save()
+            p.setPen(QPen(QColor("#123a28"),1.5)); p.setBrush(QColor("#267247"))
+            p.drawRoundedRect(body,5,5)
+            p.setBrush(QColor("#111820")); p.setPen(QPen(QColor("#71808a"),1.5))
+            lens=QRectF(body.left()+10,body.center().y()-20,40,40); p.drawEllipse(lens)
+            p.setBrush(QColor("#392944")); p.setPen(QPen(QColor("#b878d1"),1))
+            p.drawEllipse(lens.adjusted(8,8,-8,-8))
+            p.setBrush(QColor("#17232c")); p.setPen(QPen(QColor("#0d1720"),1))
+            chip=QRectF(body.left()+62,body.top()+14,34,29); p.drawRoundedRect(chip,2,2)
+            for offset in (6,13,20,27):
+                p.drawLine(QPointF(chip.left()-4,chip.top()+offset),QPointF(chip.left(),chip.top()+offset))
+                p.drawLine(QPointF(chip.right(),chip.top()+offset),QPointF(chip.right()+4,chip.top()+offset))
+            p.setBrush(QColor("#d3b554")); p.setPen(QPen(QColor("#795e25"),1))
+            p.drawEllipse(QPointF(body.right()-23,body.center().y()),10,10)
+            p.drawLine(QPointF(body.right()-29,body.center().y()),QPointF(body.right()-17,body.center().y()))
+            lit=self.component.properties.get("sim_flame_detected")=="true"
+            p.setPen(QPen(QColor("#ff503c" if lit else "#82463f"),1)); p.setBrush(QColor("#ff503c" if lit else "#552d2b"))
+            p.drawEllipse(QPointF(body.right()-48,body.top()+15),4,4)
+            p.restore()
         font = QFont("Arial")
         font.setPixelSize(10)
         p.setFont(font)
@@ -307,6 +372,8 @@ class ComponentItem(QGraphicsObject):
             text_rect=QRectF(body.left()+5,body.top()+4,body.width()-10,max(15,body.height()-23))
         else:
             text_rect=QRectF(body.left()+5,body.top()+1,body.width()-10,30 if "\n" in title else 18)
+        if d.name.startswith("Port USB") and len(d.pins)<=8:
+            text_rect=QRectF(body.left()+5,body.top()+55,body.width()-10,32)
         # Nazwa nie może zniknąć po cichym elipsowaniu. Dobieramy mniejszą
         # czcionkę i ręcznie zawijamy tekst w obrębie korpusu modułu.
         # Tytuły modułów zachowują czytelność przy tych samych zasadach co
@@ -322,6 +389,16 @@ class ComponentItem(QGraphicsObject):
                                                text_rect.width(), text_rect.height()), centered=True)
         p.restore()
         p.restore()
+
+        from app.canvas.connector_art import paint_connectors
+        paint_connectors(self,p,body)
+
+    def connector_body(self):
+        if self.definition.name=="Kostka zasilająca USB": return QRectF(-30,-32,60,64)
+        d,r=self.definition,self._hit_rect
+        if bottom_sockets(d): r=self._symbol_rect
+        top=any(abs(pin.y-r.top())<.1 for pin in d.pins)
+        return r.adjusted(20,20 if top or len(d.pins)>8 else 0,-20,-20)
 
     def _device_symbol(self, p):
         """Symbole urządzeń z wewnętrznym połączeniem, nie puste pudełka.
@@ -420,10 +497,10 @@ class ComponentItem(QGraphicsObject):
     def _simple_symbol(self,p):
         s=self.definition.symbol
         line=lambda a,b,c,d:self._line(p,a,b,c,d)
-        two_terminal=s in {"resistor","capacitor","polar_capacitor","inductor","crystal","ldr","thermistor","diode","zener","schottky","led","battery","buzzer","thyristor","triac"}
+        two_terminal=s in {"resistor","variable_resistor","capacitor","polar_capacitor","inductor","crystal","ldr","thermistor","diode","zener","schottky","led","battery","buzzer","thyristor","triac"}
         if two_terminal:
             line(-40,0,-20,0);line(20,0,40,0)
-        if s in {"resistor","ldr","thermistor","potentiometer"}:
+        if s in {"resistor","variable_resistor","ldr","thermistor","potentiometer"}:
             if s=="potentiometer":line(-40,0,-20,0);line(20,0,40,0)
             # Prostokąt jest wariantem europejskim; PN wdrażająca EN używa
             # tego samego rysunku, nie amerykańskiego zygzaka.
@@ -435,6 +512,7 @@ class ComponentItem(QGraphicsObject):
             else:
                 p.drawRect(QRectF(-20,-7,40,14))
             if s=="potentiometer":self._arrow(p,QPointF(0,-40),QPointF(0,-8))
+            if s=="variable_resistor":self._arrow(p,QPointF(13,20),QPointF(-13,-20))
             if s=="thermistor":line(-15,12,15,-12);line(-15,12,-21,12)
             if s=="ldr":
                 self._arrow(p,QPointF(-20,-27),QPointF(-9,-13))
@@ -731,7 +809,24 @@ class ComponentItem(QGraphicsObject):
         color=QColor(getattr(self, "ink_color", "#163247"))
         painter.setPen(QPen(color,1.35,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        if self.definition.symbol in {"logic_input", "logic_output"}:
+        if self.asset_case:
+            painter.setBrush(QColor(getattr(self,'paper_color','white')))
+            from app.canvas.case_shapes import outline
+            body,strokes=outline(self.asset_case['shapes']); painter.drawPath(body)
+            painter.setBrush(Qt.BrushStyle.NoBrush); painter.drawPath(strokes)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawText(self._symbol_rect.adjusted(8,8,-8,-8),Qt.AlignmentFlag.AlignTop|Qt.AlignmentFlag.AlignHCenter,self.display_name)
+            font=painter.font(); font.setPixelSize(10); painter.setFont(font)
+            for pin in self.definition.pins:
+                point=QPointF(pin.x,pin.y)
+                from app.canvas.case_shapes import pin_root
+                inside=pin_root(self.asset_case['shapes'],point)
+                painter.drawLine(inside,point)
+                label=pin.number+(' '+pin.name if self.asset_case.get('show_pin_names',False) else '')
+                self._pin_label(painter,QPointF(pin.x+4,pin.y-4),label)
+            for region in self.asset_case.get('regions',[]):
+                painter.drawEllipse(QRectF(*region['rect'])) if region['kind']=='light' else painter.drawRect(QRectF(*region['rect']))
+        elif self.definition.symbol in {"logic_input", "logic_output"}:
             live_logic = hasattr(self, "logic_label")
             painter.drawRect(QRectF(-20,-20,40,40))
             if self.definition.symbol == "logic_input":
@@ -748,6 +843,160 @@ class ComponentItem(QGraphicsObject):
                              getattr(self, "logic_label", "IN" if self.definition.symbol == "logic_input" else "OUT"))
             painter.restore()
             self._bottom_labels(painter)
+        elif self.definition.name == 'Karta RFID':
+            body=self.symbol_rect(self.definition).adjusted(3,3,-3,-3)
+            painter.setPen(QPen(QColor('#c6cbd0'),2)); painter.setBrush(QColor('#e5e8e8'))
+            painter.drawRoundedRect(body,9,9)
+            painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor('#263d50'))
+            painter.drawRoundedRect(QRectF(body.left()+2,body.top()+3,body.width()-4,18),6,6)
+            chip=QRectF(body.left()+13,body.bottom()-34,34,24)
+            painter.setPen(QPen(QColor('#83692d'),1)); painter.setBrush(QColor('#dfc36f'))
+            painter.drawRoundedRect(chip,4,4)
+            painter.drawLine(QPointF(chip.center().x(),chip.top()),QPointF(chip.center().x(),chip.bottom()))
+            painter.drawLine(QPointF(chip.left(),chip.center().y()),QPointF(chip.right(),chip.center().y()))
+            painter.setPen(QPen(QColor('#aab8c4'),1)); painter.setBrush(Qt.BrushStyle.NoBrush)
+            for inset in (7,11,15):
+                painter.drawRoundedRect(body.adjusted(inset,inset,-inset,-inset),7,7)
+            label_x=chip.right()+7
+            label_width=max(0.0,body.right()-label_x-5)
+            # The card ID goes above the RFID marking in the upper area to the
+            # chip's right, as indicated on the card-layout sketch.
+            painter.setPen(QColor('#243747'))
+            font=painter.font(); font.setPixelSize(9); font.setBold(False); painter.setFont(font)
+            id_rect=QRectF(label_x,body.top()+24,label_width,16)
+            painter.drawText(id_rect,Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,
+                str(self.component.properties.get('rfid_id','A1B2C3D4')))
+            font.setPixelSize(11); font.setBold(True); painter.setFont(font)
+            painter.drawText(QRectF(label_x,id_rect.bottom(),label_width,18),
+                Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,'RFID')
+            painter.setPen(QPen(QColor('#254151'),2)); painter.setBrush(Qt.BrushStyle.NoBrush)
+            for radius in (5,9,13):
+                painter.drawArc(QRectF(body.right()-30-radius,body.center().y()-radius,2*radius,2*radius),-55*16,110*16)
+        elif self.definition.name == 'Zapałka':
+            lit=self.component.properties.get('sim_lit')=='true'
+            shaft_start=QPointF(-43,14); shaft_end=QPointF(37,-12)
+            painter.setPen(QPen(QColor('#684426'),9,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            painter.drawLine(shaft_start,shaft_end)
+            painter.setPen(QPen(QColor('#c28a4c'),5,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            painter.drawLine(shaft_start,shaft_end)
+            painter.setPen(QPen(QColor('#56332c'),1)); painter.setBrush(QColor('#ba3e32'))
+            painter.drawEllipse(QPointF(42,-14),8,6)
+            if lit:
+                painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor(255,115,35,80))
+                painter.drawEllipse(QPointF(48,-18),19,17)
+                painter.setBrush(QColor('#ff8a27'))
+                painter.drawPolygon(QPolygonF([QPointF(39,-17),QPointF(43,-32),QPointF(49,-25),QPointF(54,-37),QPointF(57,-20),QPointF(51,-10),QPointF(43,-11)]))
+                painter.setBrush(QColor('#ffe28a'))
+                painter.drawPolygon(QPolygonF([QPointF(46,-17),QPointF(49,-27),QPointF(53,-18),QPointF(50,-13)]))
+        elif self.definition.symbol == 'ultrasonic_target':
+            body=QRectF(-52,-30,104,60)
+            painter.setPen(QPen(QColor('#4f5962'),2)); painter.setBrush(QColor('#b5bdc3'))
+            painter.drawRoundedRect(body,4,4)
+            painter.setPen(QPen(QColor('#77838b'),1)); painter.setBrush(QColor('#dbe0e3'))
+            painter.drawRoundedRect(body.adjusted(7,7,-7,-7),2,2)
+            for x in range(-32,33,16): painter.drawLine(QPointF(x,-20),QPointF(x,20))
+            painter.setPen(QColor('#36424a')); font=painter.font(); font.setPixelSize(9); painter.setFont(font)
+            painter.drawText(QRectF(-48,31,96,14),Qt.AlignmentFlag.AlignCenter,'HC-SR04 target')
+            self._bottom_labels(painter)
+        elif self.definition.symbol == 'motion_target':
+            # Neutral, instantly recognizable person silhouette used as a
+            # movable heat/motion source in the simulation sandbox.
+            painter.setPen(QPen(QColor('#263b4b'),2)); painter.setBrush(QColor('#dfb783'))
+            painter.drawEllipse(QPointF(0,-39),13,13)
+            painter.setPen(QPen(QColor('#233e52'),2)); painter.setBrush(QColor('#397aa2'))
+            painter.drawRoundedRect(QRectF(-17,-24,34,43),8,8)
+            painter.setPen(QPen(QColor('#263b4b'),7,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            painter.drawLine(QPointF(-9,17),QPointF(-13,48)); painter.drawLine(QPointF(9,17),QPointF(13,48))
+            painter.setPen(QPen(QColor('#dfb783'),6,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
+            painter.drawLine(QPointF(-15,-15),QPointF(-29,7)); painter.drawLine(QPointF(15,-15),QPointF(29,7))
+            self._bottom_labels(painter)
+        elif self.definition.symbol == 'ir_remote':
+            body=QRectF(-29,-69,58,138)
+            painter.setPen(QPen(QColor('#080d12'),2)); painter.setBrush(QColor('#252b31'))
+            painter.drawRoundedRect(body,15,15)
+            painter.setPen(QPen(QColor('#424b54'),1)); painter.setBrush(QColor('#0d1217'))
+            painter.drawRoundedRect(QRectF(-21,-61,42,20),7,7)
+            painter.setBrush(QColor('#c34a45')); painter.drawEllipse(QPointF(0,-51),5,5)
+            painter.setBrush(QColor('#56636e'))
+            for row in range(4):
+                for col in range(3): painter.drawRoundedRect(QRectF(-18+col*13,-32+row*20,10,12),4,4)
+            painter.setPen(QColor('#c6d5df')); font=painter.font(); font.setPixelSize(8); painter.setFont(font)
+            painter.drawText(QRectF(-25,52,50,12),Qt.AlignmentFlag.AlignCenter,'IR')
+            self._bottom_labels(painter)
+        elif self.definition.name in CABLE_NAMES:
+            props=self.component.properties; prefix='usb_' if self.definition.name=='Kabel USB' else 'jumper_'
+            a,b=self.cable_points()
+            path=QPainterPath(a); path.cubicTo(a+QPointF(0,80),b+QPointF(0,80),b)
+            painter.save(); painter.setPen(QPen(color,5,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap)); painter.drawPath(path); painter.restore()
+            from app.canvas.connector_art import socket
+            for point,side,default in ((a,'a','A'),(b,'b','C')):
+                painter.save(); painter.translate(point); x=0
+                painter.drawRoundedRect(QRectF(x-15,-15,30,30),4,4)
+                if prefix=='usb_': socket(painter,QRectF(x-23,-25,46,28),self.component.properties.get("sim_usb_"+side+"_type",default))
+                else:
+                    from app.simulation.jumper import GENDERS
+                    gender=GENDERS[self.component.library_id][0 if side=='a' else 1]
+                    from app.canvas.connector_art import jumper_contact
+                    jumper_contact(painter,QPointF(0,-28),gender)
+                painter.restore()
+            self._bottom_labels(painter)
+        elif self.definition.name=="Klawiatura USB":
+            body=self.connector_body(); painter.setBrush(QColor(getattr(self,"paper_color","#ffffff")))
+            painter.drawRoundedRect(body,6,6)
+            for row in range(4):
+                for col in range(10 if row<3 else 5):
+                    painter.drawRoundedRect(QRectF(body.left()+7+col*(body.width()-14)/10,body.top()+6+row*13,(body.width()-18)/10,10),1,1)
+            painter.drawText(body.adjusted(5,60,-5,-3),Qt.AlignmentFlag.AlignCenter,self.display_name)
+            from app.canvas.connector_art import paint_connectors
+            paint_connectors(self,painter,body)
+        elif self.definition.symbol == "multi_switch":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            self._line(painter,-60,0,-25,0)
+            selected=int(self.component.properties.get("sim_position","1"))
+            if selected==0 and self.component.properties.get('sim_allow_off','true')=='false': selected=1
+            for pin in self.definition.pins[1:]:
+                self._line(painter,25,pin.y,60,pin.y)
+                painter.drawEllipse(QPointF(25,pin.y),3,3)
+                self._pin_label(painter,QRectF(36,pin.y-16,20,14),pin.name)
+            destination=next((p for p in self.definition.pins if p.name==str(selected)),None)
+            self._line(painter,-25,0,20 if destination else 0,destination.y if destination else -25)
+            self._bottom_labels(painter)
+        elif self.definition.name == "Kostka zasilająca USB":
+            painter.setBrush(QColor(getattr(self,"paper_color","#ffffff")))
+            painter.drawRoundedRect(QRectF(-30,-32,60,64),8,8)
+            self._line(painter,-18,-32,-18,-49); self._line(painter,18,-32,18,-49)
+            from app.canvas.connector_art import socket
+            from app.canvas.connector_art import socket_regions
+            for kind,rect in socket_regions(self,self.connector_body()): socket(painter,rect,kind)
+            self._bottom_labels(painter)
+        elif self.definition.symbol == "breadboard":
+            painter.setBrush(Qt.BrushStyle.NoBrush); painter.drawRoundedRect(QRectF(-220,-140,440,280),8,8)
+            painter.drawLine(QPointF(0,-125),QPointF(0,105))
+            for pin in self.definition.pins: painter.drawRect(QRectF(pin.x-4,pin.y-4,8,8))
+            font=QFont(painter.font()); font.setPixelSize(9); painter.save(); painter.setFont(font)
+            for column,x in zip('ABCDEFGHIJ',[-140,-120,-100,-80,-60,60,80,100,120,140]): painter.drawText(QRectF(x-7,-122,14,12),Qt.AlignmentFlag.AlignCenter,column)
+            for row in range(10): painter.drawText(QRectF(-16,-107+row*20,32,14),Qt.AlignmentFlag.AlignCenter,str(row+1))
+            painter.restore()
+            self._bottom_labels(painter)
+        elif self.definition.symbol == "goldpin":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(QRectF(-5,-15,30,30))
+            # RC1: thick monochrome male pin or hollow female socket, attached
+            # to the offset square. Cable housings are painted separately.
+            if self.definition.name=='Goldpin żeński':
+                painter.drawRect(QRectF(-40,-5,35,10))
+            else:
+                painter.save(); painter.setPen(QPen(color,8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.FlatCap))
+                painter.drawLine(QPointF(-40,0),QPointF(-5,0)); painter.restore()
+            self._line(painter,25,0,40,0)
+            self._bottom_labels(painter)
+        elif self.definition.symbol == "meter":
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(0,0),20,20)
+            self._line(painter,-40,0,-20,0); self._line(painter,20,0,40,0)
+            letter={"Woltomierz":"V","Amperomierz":"A","Omomierz":"Ω","Tester ciągłości":"•","Oscyloskop":"~"}.get(self.definition.name,"?")
+            painter.drawText(QRectF(-20,-20,40,40),Qt.AlignmentFlag.AlignCenter,letter)
+            self._bottom_labels(painter)
         elif self.definition.symbol.startswith("gate_"):
             self._logic_gate(painter)
         elif self.definition.symbol in {"relay","rgb","motor","opto"}:
@@ -760,7 +1009,7 @@ class ComponentItem(QGraphicsObject):
         # Niezajęty pin to drobny pusty okrąg. Duże zielone węzły należą do
         # przewodów i nie mogą mylić się z samym elektrycznym wyprowadzeniem.
         painter.setBrush(QColor(getattr(self, "paper_color", "white")))
-        for pin in self.definition.pins:
+        for pin in (() if self.definition.name in CABLE_NAMES or self.definition.name in {"Kostka zasilająca USB","Klawiatura USB"} else self.definition.pins[1:] if self.definition.symbol=='goldpin' else self.definition.pins):
             painter.drawEllipse(QPointF(pin.x,pin.y),1.6,1.6)
         if self.isSelected():
             painter.setBrush(Qt.BrushStyle.NoBrush)

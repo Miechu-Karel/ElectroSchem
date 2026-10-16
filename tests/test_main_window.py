@@ -36,12 +36,12 @@ class MainWindowTests(unittest.TestCase):
 
     def test_version_localization_icons_and_no_properties_dock(self):
         window = self.window
-        self.assertEqual(APP_VERSION, "1.2.1")
+        self.assertEqual(APP_VERSION, "1.3.0")
         self.assertFalse(window.windowIcon().isNull())
         self.assertEqual({size.width() for size in window.windowIcon().availableSizes()},
                          {72,144,432,576})
         self.assertEqual(window.tools_heading.text(), "BASIC TOOLS")
-        self.assertFalse(window.ai_action.isEnabled())
+        self.assertTrue(window.ai_action.isEnabled())
         self.assertFalse(window.datasheet_action.isEnabled())
         self.assertFalse(window.comment_action.icon().isNull())
         self.assertFalse(hasattr(window, "properties_widget"))
