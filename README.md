@@ -1,13 +1,20 @@
 # ElectroSchem
 
-**ElectroSchem 1.3.0** is a desktop editor for electronic schematics,
-built with Python and PySide6 (Qt). Draw circuits, connect components and
-prepare documentation without a full PCB design environment.
+**ElectroSchem 1.3.1** is a desktop editor for electronic schematics, built
+with Python and PySide6 (Qt). Draw circuits, connect components and prepare
+documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
 
-### Latest release 1.3.0
+### Latest stable release 1.3.1
+
+Version 1.3.1 promotes the tested 1.3.1alfa1. Large schematic selections
+remain responsive during movement, with affected wires rerouted after release
+in a background worker. The dark-theme sheet, grid and title block are dimmed
+by about 15%. See [1.3.1 release details](docs/RELEASE131.md).
+
+### Previous stable release 1.3.0
 
 Version 1.3.0 promotes the tested 1.3.0rc25. It includes the **Terminale**
 submenu for terminal blocks, ELS format v4 saves, and the other RC25 features.
@@ -284,10 +291,11 @@ Selected destinations never overwrite existing files.
 
 ### Stable release 1.2.0
 
-Version 1.2.0 promotes 1.2.0rc1 without functional changes. Portable Windows
-releases are available on the `biults` branch under `biult/1.1.1` and
-`biult/1.2.0`, with the latest patch in `biult/1.2.1`. Keep each EXE with its matching `_internal` directory. The `main`
-branch contains source code, not portable build folders.
+Version 1.2.0 promotes 1.2.0rc1 without functional changes. Earlier portable
+builds remain on the `biults` branch; versioned exports are kept in their own
+`exports/vX.Y.Z` branches, including `exports/v1.3.0` and `exports/v1.3.1`.
+Keep each EXE with its matching `_internal` directory. The `main` branch
+contains source code, not portable build folders.
 
 ### 1.2.0rc1 changes
 

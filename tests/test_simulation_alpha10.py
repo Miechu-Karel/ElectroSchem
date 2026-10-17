@@ -133,7 +133,7 @@ class Alpha10Tests(unittest.TestCase):
         try:
             window.project.sheets=[example("dc")]; window._rebuild_tabs(); window.show_simulation(); sim=window.simulation_window
             before=deepcopy(window.project.to_dict())
-            self.assertIn("1.3.0",sim.windowTitle())
+            self.assertIn("1.3.1",sim.windowTitle())
             self.assertEqual(sim.windowIcon().cacheKey(),window.windowIcon().cacheKey())
             for theme in ("light","dark","light"):
                 window.settings.theme=theme; sim.refresh_theme(); window._current_view().apply_settings(window.settings)
@@ -143,10 +143,10 @@ class Alpha10Tests(unittest.TestCase):
                 lightness=QColor(canvas_colors(window.settings)["paper"]).lightness()
                 self.assertGreater(lightness,140)
                 if theme=="dark":
-                    self.assertEqual(lightness,218)
+                    self.assertEqual(lightness,185)
                     channel=lightness/255
                     luminance=((channel+0.055)/1.055)**2.4
-                    self.assertAlmostEqual(luminance,0.70,delta=0.01)
+                    self.assertAlmostEqual(luminance,0.485,delta=0.01)
                 else: self.assertGreater(lightness,240)
                 self.assertLess(QColor(canvas_colors(window.settings)["ink"]).lightness(),100)
                 self.assertNotIn("#151c26",sim.styleSheet())

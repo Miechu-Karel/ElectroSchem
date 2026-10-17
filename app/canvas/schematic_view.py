@@ -7,7 +7,9 @@ from __future__ import annotations
 from copy import copy, deepcopy
 from dataclasses import replace
 from math import ceil, floor
-from PySide6.QtCore import QByteArray, QMimeData, QLineF, QPointF, QRectF, Qt, QTimer
+from queue import Empty, Queue
+from threading import Lock
+from PySide6.QtCore import QByteArray, QMimeData, QLineF, QPointF, QRectF, Qt, QTimer, QRunnable, QThreadPool
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen, QCursor, QFont, QTransform
 from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsView, QGraphicsRectItem
 from app.core.models import Annotation, ComponentInstance, Project, Sheet, Wire, new_id
@@ -21,6 +23,53 @@ from app.ui.theme import canvas_colors
 
 PAGE_RECT = QRectF(0, 0, 1188, 840)  # zgodność z dawnymi integracjami; widok używa paper_rect()
 ITEM_DATA_KIND, ITEM_DATA_ID = 0, 1
+_ACTIVE_WIRE_ROUTE_TASKS = set()
+_ACTIVE_WIRE_ROUTE_TASKS_LOCK = Lock()
+
+
+def _compute_wire_routes(sheet, wire_ids):
+    """Route detached wire data; this function is safe to run off the GUI thread."""
+    from app.canvas.routing import safe_route
+
+    routing_by_id = {wire.id: wire for wire in sheet.wires}
+    moving_ids = set(wire_ids)
+    routes = {}
+    for wire_id in sorted(moving_ids):
+        wire = routing_by_id.get(wire_id)
+        if wire is None:
+            continue
+        junctions = {getattr(wire, side + "_junction_id") for side in ("start", "end")}
+        junctions.discard(None)
+        related = {other.id for other in sheet.wires
+                   if other.id in moving_ids and other.id != wire.id and
+                   junctions.intersection(getattr(other, side + "_junction_id")
+                                          for side in ("start", "end"))}
+        route = safe_route(sheet, QPointF(wire.start_x, wire.start_y),
+                           QPointF(wire.end_x, wire.end_y), exclude=(wire.id, *related))
+        if route:
+            routes[wire.id] = [[point.x(), point.y()] for point in route]
+    return routes
+
+
+class _WireRouteTask(QRunnable):
+    def __init__(self, snapshot, source_sheet, generation, wire_ids, result_queue):
+        super().__init__()
+        self.snapshot = snapshot
+        self.source_sheet = source_sheet
+        self.generation = generation
+        self.wire_ids = set(wire_ids)
+        self.result_queue = result_queue
+
+    def run(self):
+        routes, error = {}, None
+        try:
+            routes = _compute_wire_routes(self.snapshot, self.wire_ids)
+        except Exception as exc:  # Keep worker failures away from Qt's event loop.
+            error = f"{type(exc).__name__}: {exc}"
+        self.result_queue.put((self.generation, self.source_sheet,
+                               self.wire_ids, routes, error))
+        with _ACTIVE_WIRE_ROUTE_TASKS_LOCK:
+            _ACTIVE_WIRE_ROUTE_TASKS.discard(self)
 
 class PaperScene(QGraphicsScene):
     def __init__(self, view):
@@ -97,9 +146,19 @@ class SchematicView(QGraphicsView):
         self._rubber_start = None
         self._rubber_item = None
         self._group_drag = None
+        self._route_generation = 0
+        self._route_pending_ids = set()
+        self._route_task_running = False
+        self._route_task = None
+        self._last_route_error = None
+        self._route_result_queue = Queue()
+        self._route_poll_timer = QTimer(self)
+        self._route_poll_timer.setInterval(20)
+        self._route_poll_timer.timeout.connect(self._poll_wire_route_result)
         self._paste_serial = 0
         self._last_paste = None
         self.on_change = self.on_selection = self.on_edit_properties = None
+        self.on_routes_updated = None
         self._page_fitted = False
         self._fitting = False
         self._auto_fit = True
@@ -210,6 +269,10 @@ class SchematicView(QGraphicsView):
         self.setCursor(Qt.CursorShape.ArrowCursor if tool == "select" else Qt.CursorShape.CrossCursor)
 
     def load_sheet(self, sheet):
+        # Worker results belong to the previous canvas state and must never
+        # overwrite a newly loaded, undone, or switched-to sheet.
+        self._route_generation += 1
+        self._route_pending_ids.clear()
         self._loading = True
         self._clear_wire_preview()
         if self._rubber_item is not None:
@@ -519,11 +582,8 @@ class SchematicView(QGraphicsView):
         """Return the shortest legal routes for moved wires against the new layout."""
         if not wire_ids:
             return {}
-        from app.canvas.routing import safe_route
-
         routing_sheet = copy(self._sheet)
         routing_sheet.wires = deepcopy(wires)
-        routing_by_id = {wire.id: wire for wire in routing_sheet.wires}
         # During a drag, always route against the geometry captured at press
         # time, not the previous mouse frame's just-rerouted paths. This keeps
         # junction branches from chasing each other and leaving tiny elbows.
@@ -532,27 +592,89 @@ class SchematicView(QGraphicsView):
             original = gesture_points.get(candidate.id)
             if original:
                 candidate.points = deepcopy(original)
-        moving_ids = set(wire_ids)
-        routes = {}
-        for wire_id in sorted(moving_ids):
-            wire = routing_by_id.get(wire_id)
-            if wire is None:
-                continue
-            junctions = {getattr(wire, side+"_junction_id") for side in ("start", "end")}
-            junctions.discard(None)
-            related = {other.id for other in routing_sheet.wires
-                       if other.id in moving_ids and other.id != wire.id and
-                       junctions.intersection(getattr(other, side+"_junction_id")
-                                              for side in ("start", "end"))}
-            route = safe_route(routing_sheet, self._end_point(wire, "start"),
-                               self._end_point(wire, "end"), exclude=(wire.id, *related))
-            if route:
-                routes[wire.id] = route
-        return routes
+        return {wire_id: [QPointF(*point) for point in route]
+                for wire_id, route in _compute_wire_routes(routing_sheet, wire_ids).items()}
 
-    def _refresh_attached_wires(self, force_reroute=False):
-        if not self._sheet or self._refreshing:
+    @staticmethod
+    def _routing_snapshot(sheet):
+        """Copy only the immutable page geometry and wires needed by the router."""
+        snapshot = copy(sheet)
+        snapshot.components = []
+        snapshot.comments = []
+        snapshot.wires = []
+        for wire in sheet.wires:
+            detached = copy(wire)
+            detached.points = [list(point) for point in wire.points]
+            snapshot.wires.append(detached)
+        return snapshot
+
+    def _schedule_wire_routes(self, wire_ids):
+        if not self._sheet or not wire_ids:
             return
+        present = {wire.id for wire in self._sheet.wires}
+        self._route_pending_ids.update(set(wire_ids) & present)
+        self._start_wire_route_task()
+
+    def _start_wire_route_task(self):
+        if self._route_task_running or not self._route_pending_ids or not self._sheet:
+            return
+        source_sheet = self._sheet
+        wire_ids = set(self._route_pending_ids)
+        self._route_pending_ids.clear()
+        task = _WireRouteTask(self._routing_snapshot(source_sheet), source_sheet,
+                              self._route_generation, wire_ids, self._route_result_queue)
+        self._route_task_running = True
+        self._route_task = task
+        with _ACTIVE_WIRE_ROUTE_TASKS_LOCK:
+            _ACTIVE_WIRE_ROUTE_TASKS.add(task)
+        QThreadPool.globalInstance().start(task)
+        if not self._route_poll_timer.isActive():
+            self._route_poll_timer.start()
+
+    def _poll_wire_route_result(self):
+        try:
+            result = self._route_result_queue.get_nowait()
+        except Empty:
+            return
+        self._wire_routes_ready(result)
+
+    def _wire_routes_ready(self, result):
+        generation, source_sheet, requested_ids, routes, error = result
+        self._route_task_running = False
+        self._route_task = None
+        self._last_route_error = error
+        if self._sheet is source_sheet and generation == self._route_generation and not error:
+            live = {wire.id: wire for wire in self._sheet.wires}
+            applied = False
+            for wire_id, points in routes.items():
+                wire = live.get(wire_id)
+                if wire is None or len(points) < 2:
+                    continue
+                # A generation check is the primary guard; endpoint checks are
+                # a final safeguard if an external caller edited the model.
+                if (QPointF(*points[0]) != self._end_point(wire, "start") or
+                        QPointF(*points[-1]) != self._end_point(wire, "end")):
+                    continue
+                wire.points = [list(point) for point in points]
+                item = self._wire_items.get(wire_id)
+                if item:
+                    item.set_points([QPointF(*point) for point in points])
+                applied = True
+            if applied and self.on_routes_updated:
+                self.on_routes_updated()
+        elif self._sheet is source_sheet and not error:
+            # A newer edit happened while the worker was routing. Re-run its
+            # requested wires against the latest model rather than applying a
+            # stale path or silently leaving a provisional path behind.
+            self._route_pending_ids.update(requested_ids)
+        if self._route_pending_ids:
+            self._start_wire_route_task()
+        else:
+            self._route_poll_timer.stop()
+
+    def _refresh_attached_wires(self, force_reroute=False, defer_routing=False):
+        if not self._sheet or self._refreshing:
+            return set()
         self._refreshing = True
         try:
             if getattr(self,'cable_layer',None): self.cable_layer.follow_targets()
@@ -589,7 +711,8 @@ class SchematicView(QGraphicsView):
                 if not endpoints_unchanged or not baseline:
                     reroute_ids.add(wire.id)
 
-            shortest_routes = self._routes_after_movement(self._sheet.wires, reroute_ids)
+            shortest_routes = ({} if defer_routing else
+                               self._routes_after_movement(self._sheet.wires, reroute_ids))
             from app.canvas.wire_geometry import stretch, compact_route
             for wire in self._sheet.wires:
                 start, end = self._end_point(wire, "start"), self._end_point(wire, "end")
@@ -607,8 +730,10 @@ class SchematicView(QGraphicsView):
                 else:
                     route = compact_route(route)
                 wire.points = [[p.x(), p.y()] for p in route]
-                if wire.id in self._wire_items:
-                    self._wire_items[wire.id].set_points(route)
+                item = self._wire_items.get(wire.id)
+                if item and item.points != route:
+                    item.set_points(route)
+            return reroute_ids
         finally:
             self._refreshing = False
 
@@ -624,12 +749,18 @@ class SchematicView(QGraphicsView):
                 setattr(wire, side+"_x", pin.x())
                 setattr(wire, side+"_y", pin.y())
 
-    def _attach_free_wire_ends_to_component_pins(self,join=True):
+    def _attach_free_wire_ends_to_component_pins(self,join=True,refresh=True):
+        attached = set()
         for wire, side in self._ends():
             if getattr(wire, side+"_component_id") is None:
+                old_component = getattr(wire, side + "_component_id")
                 self._attach_end_if_near_pin(wire, side == "start")
+                if getattr(wire, side + "_component_id") != old_component:
+                    attached.add(wire.id)
         if join: self._join_coincident_ends()
-        self._refresh_attached_wires()
+        if refresh:
+            attached.update(self._refresh_attached_wires())
+        return attached
 
     def _nearest_wire_endpoint(self, point):
         candidates = [(self._end_point(w, s), w.id, s == "start") for w, s in self._ends()]
@@ -846,16 +977,26 @@ class SchematicView(QGraphicsView):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton and self._group_drag is not None:
-            moved = self._group_drag["delta"] != QPointF()
-            released_asset=bool(self._group_drag.get("asset"))
-            origin = self._group_drag["origin"]
-            moved_ids = self._group_drag["ids"]
+            group = self._group_drag
+            moved = group["delta"] != QPointF()
+            released_asset=bool(group.get("asset"))
+            origin = group["origin"]
+            moved_ids = group["ids"]
+            deferred_routes = bool(group.get("defer_routing"))
+            moved_wire_ids = set(group.get("moved_wire_ids", ()))
             self._group_drag = None
             self._wire_gesture_points={}
             if moved:
                 # Moving geometry is not an instruction to join unrelated nets.
-                self._attach_free_wire_ends_to_component_pins(join=False)
+                if deferred_routes:
+                    changed_wire_ids = self._attach_free_wire_ends_to_component_pins(
+                        join=False, refresh=False)
+                    changed_wire_ids.update(self._refresh_attached_wires(defer_routing=True))
+                else:
+                    changed_wire_ids = self._attach_free_wire_ends_to_component_pins(join=False)
                 self._changed()
+                if deferred_routes:
+                    self._schedule_wire_routes(moved_wire_ids | changed_wire_ids)
             elif not event.modifiers() and not released_asset:
                 # Sam klik nadal wybiera jeden obiekt, dopiero ruch myszy
                 # uruchamia przesunięcie całego wcześniejszego zaznaczenia.
@@ -1054,6 +1195,8 @@ class SchematicView(QGraphicsView):
             "ids": {i.data(1) for i in selected},
             "items": [(i, QPointF(i.pos())) for i in selected if i.data(0) in {"component", "comment"}],
             "wires": deepcopy(self._sheet.wires),
+            "moved_wire_ids": set(),
+            "defer_routing": False,
         }
 
     def _move_selection_group(self, delta):
@@ -1076,7 +1219,10 @@ class SchematicView(QGraphicsView):
                     return False
             elif not self.paper_rect().contains(destination):
                 return False
-        wires = deepcopy(group["wires"])
+        # The gesture snapshot is immutable. A shallow copy of each dataclass
+        # is enough here because every changed waypoint list is replaced, never
+        # mutated in place; avoid recursively copying all routes per mouse event.
+        wires = [copy(wire) for wire in group["wires"]]
         moving_junctions, fixed_junctions = set(), set()
         for wire in wires:
             for side in ("start", "end"):
@@ -1111,12 +1257,24 @@ class SchematicView(QGraphicsView):
                 return False
             wire.points = [[p.x(), p.y()] for p in route]
             moved_wire_ids.add(wire.id)
-        shortest_routes = self._routes_after_movement(wires, moved_wire_ids)
-        if moved_wire_ids - shortest_routes.keys():
+        group["moved_wire_ids"].update(moved_wire_ids)
+        defer_routing = (group["defer_routing"] or len(ids) >= 8 or
+                         len(moved_wire_ids) >= 4 or len(moved_wire_ids) * len(wires) >= 64)
+        group["defer_routing"] = defer_routing
+        shortest_routes = {} if defer_routing else self._routes_after_movement(wires, moved_wire_ids)
+        if not defer_routing and moved_wire_ids - shortest_routes.keys():
             return False
         for wire in wires:
             if wire.id in shortest_routes:
                 wire.points = [[p.x(), p.y()] for p in shortest_routes[wire.id]]
+            elif defer_routing and wire.id in moved_wire_ids:
+                route = [QPointF(*point) for point in wire.points]
+                if not route_allowed(self._sheet, route):
+                    route = self._route_in_drawing_area(
+                        self._end_point(wire, "start"), self._end_point(wire, "end"))
+                    if not route:
+                        return False
+                    wire.points = [[point.x(), point.y()] for point in route]
         self._refreshing = True
         try:
             for item, original in group["items"]:
@@ -1129,7 +1287,7 @@ class SchematicView(QGraphicsView):
         finally:
             self._refreshing = False
         group["delta"] = delta
-        self._refresh_attached_wires()
+        self._refresh_attached_wires(defer_routing=defer_routing)
         return True
 
     def _delete_item(self, item):
@@ -1380,6 +1538,9 @@ class SchematicView(QGraphicsView):
 
     def _changed(self):
         self._sync_component_positions()
+        # Any model edit invalidates results computed against the previous
+        # layout. Stale queued routes are retried against the current snapshot.
+        self._route_generation += 1
         if self.on_change and not self._loading:
             self.on_change()
 

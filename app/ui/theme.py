@@ -36,11 +36,12 @@ def tint_icon(icon):
 
 def canvas_colors(settings):
     if getattr(settings,"theme","light")=="dark":
-        # sRGB #dadada is approximately 70% of white's linear luminance.
-        # This affects the sheet only, never monitor brightness or exports.
-        return dict(paper="#dadada",faint_paper="#d6d6d6",outside="#0f161f",
-                    ink="#102536",wire="#126432",grid="#c7ccd1",dots="#87929b",
-                    frame="#4b5660",table="#dadada",selected="#873400")
+        # Dim the previous dark-theme sheet, including its raster, by about
+        # 15% in sRGB. This affects only the canvas, never monitor brightness
+        # or exported pages.
+        return dict(paper="#b9b9b9",faint_paper="#b6b6b6",outside="#0f161f",
+                    ink="#102536",wire="#126432",grid="#a9adb2",dots="#737c83",
+                    frame="#4b5660",table="#b9b9b9",selected="#873400")
     return dict(paper="#ffffff",faint_paper="#faf9f6",outside="#e5ebf0",
                 ink="#163247",wire="#167d3d",grid="#e7edf1",dots="#939b9f",
                 frame="#667786",table="#ffffff",selected="#df6b45")

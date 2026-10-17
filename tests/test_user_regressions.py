@@ -21,10 +21,10 @@ RESISTOR = next(item for item in BUILT_IN_ITEMS if item.name == "Rezystor")
 
 
 class WireRoutingRegressionTests(unittest.TestCase):
-    def test_official_release_version(self):
+    def test_application_version(self):
         from app.ui.main_window import APP_VERSION
 
-        self.assertEqual(APP_VERSION, "1.3.0")
+        self.assertEqual(APP_VERSION, "1.3.1")
 
     def test_overlapping_wire_uses_nearest_shortest_legal_detour(self):
         from app.core.models import Sheet

@@ -30,7 +30,7 @@ class ModelTests(unittest.TestCase):
             d=get_definition(b.add(name).library_id)
             self.assertEqual([p.name for p in d.pins],labels)
             self.assertEqual([p.number for p in d.pins],["1","2","3","4"])
-        self.assertEqual(APP_VERSION,"1.3.0")
+        self.assertEqual(APP_VERSION,"1.3.1")
 
     def test_unpowered_resistor_led_with_and_without_meter(self):
         for include_meter in (False,True):
@@ -44,7 +44,7 @@ class ModelTests(unittest.TestCase):
             self.assertTrue(math.isinf(resistance(circuit.sheet,[],circuit.netlist,z,a,circuit.devices)))
             result=circuit.step(); self.assertFalse(any(result.currents.values()))
             self.assertEqual(circuit.sheet,before)
-            if include_meter: self.assertIn("2340",result.readings[meter.id])
+            if include_meter: self.assertEqual(result.readings[meter.id],"2.34 kΩ")
 
     def test_disconnected_passive_island_beside_live_circuit(self):
         b=Bench(); supply,ground=b.power(); live=b.add("Rezystor","1000","Ω")
@@ -208,7 +208,7 @@ class UITests(unittest.TestCase):
         panel.positive.setCurrentIndex(panel.positive.findData(panel.netlist.pins[r.id,0]))
         panel.negative.setCurrentIndex(panel.negative.findData(panel.netlist.pins[led.id,1]))
         panel.mode.setCurrentIndex(panel.mode.findData("Ω")); panel.refresh()
-        self.assertEqual(panel.reading.text(),"2340 Ω")
+        self.assertEqual(panel.reading.text(),"2.34 kΩ")
         panel.positive.setCurrentIndex(panel.positive.findData(panel.netlist.pins[powered.id,0]))
         panel.negative.setCurrentIndex(panel.negative.findData(panel.netlist.pins[powered.id,1])); panel.refresh()
         self.assertIn("Odłącz zasilanie",panel.reading.text()); sim.close()

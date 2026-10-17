@@ -30,7 +30,7 @@ APP=QApplication.instance() or QApplication([])
 
 class ModelTests(unittest.TestCase):
     def test_version_and_adjustable_battery_stable_id(self):
-        self.assertEqual(APP_VERSION,"1.3.0")
+        self.assertEqual(APP_VERSION,"1.3.1")
         battery=next(d for d in AVAILABLE_ITEMS if d.name=="Bateria")
         self.assertIn("9v",battery.id.lower()); self.assertEqual(behavior_for(battery).kind,"dc")
     def test_exercise13_declared_add_properties_normalized(self):
@@ -48,7 +48,7 @@ class ModelTests(unittest.TestCase):
         meter=next(c for c in sheet.components if get_definition(c.library_id).name=="Omomierz")
         self.assertIn("25",result.readings[meter.id]); self.assertFalse(any(result.currents.values()))
         switch=next(d for d in circuit.devices if d.kind=="switch"); switch.closed=False
-        self.assertIn("inf",circuit.step().readings[meter.id])
+        self.assertEqual(circuit.step().readings[meter.id],"OL")
     def test_time_weighted_rms(self):
         data=[(i/10000,5*math.sqrt(2)*math.sin(2*math.pi*50*i/10000)) for i in range(1001)]
         self.assertAlmostEqual(rms(data,.04),5,places=3)
@@ -74,7 +74,10 @@ class ModelTests(unittest.TestCase):
         route=safe_route(sheet,QPointF(100,100),QPointF(350,100))
         self.assertIsNotNone(route); self.assertTrue(overlap_allowed(sheet,route))
     def test_asset_groups_roundtrip_and_duplicate_independent(self):
-        source=Project(sheets=[example("led")]); definition=make_asset(source,source.sheets[0],"Test")
+        bench=Bench(); first=bench.add("Rezystor","1000"); second=bench.add("Rezystor","2200")
+        bench.connect(first,1,second,0)
+        source=Project(sheets=[Sheet(components=bench.components,wires=bench.wires)])
+        definition=make_asset(source,source.sheets[0],"Test")
         destination=Project(sheets=[Sheet()]); fragment,_=instantiate(definition["asset"],ComponentInstance(definition["id"],500,400),project=destination)
         destination.sheets[0]=fragment
         restored=Project.from_dict(destination.to_dict()); sheet=restored.sheets[0]
@@ -131,10 +134,11 @@ class UIRegression(unittest.TestCase):
         plug.setPos(target); visual.attach(plug); APP.processEvents()
         actual=next(c for c in sim.sheet.components if c.id==cable.id)
         self.assertEqual(actual.properties["usb_a_target"],brick.id); self.assertEqual(self.editor.project.to_dict(),before)
-    def test_measurement_menu_flat_and_icons(self):
+    def test_connector_menu_has_four_subcategories_and_icons(self):
         menu=QMenu(); self.editor._populate_library_menu(menu,6,None)
-        self.assertEqual(len(menu.actions()),5); self.assertTrue(all(a.menu() is None for a in menu.actions()))
-        self.assertFalse(self.editor._icon("Narzędzia pomiarowe.png").isNull()); self.assertFalse(self.editor.terminal_action.icon().isNull())
+        self.assertEqual(len(menu.actions()),4); self.assertTrue(all(a.menu() is not None for a in menu.actions()))
+        self.assertFalse(self.editor.library_actions[6].icon().isNull())
+        self.assertFalse(self.editor.library_actions[7].icon().isNull())
     def test_asset_actual_drag_and_shift_drag(self):
         b=Bench(); b.add("Rezystor",value="1000"); b.add("Rezystor",value="2200")
         source=Project(sheets=[Sheet(components=b.components)])
@@ -193,6 +197,6 @@ class UIRegression(unittest.TestCase):
         self.editor.project=project; self.editor._rebuild_tabs(); self.editor.show_simulation(); APP.processEvents()
         sim=self.editor.simulation_window; sim.open_measurements(); panel=sim.measurement_panel
         panel.positive.setCurrentIndex(0); panel.negative.setCurrentIndex(1)
-        panel.mode.setCurrentIndex(2); self.assertIn("1000",panel.reading.text())
+        panel.mode.setCurrentIndex(2); self.assertEqual(panel.reading.text(),"1 kΩ")
 
 if __name__=="__main__": unittest.main()

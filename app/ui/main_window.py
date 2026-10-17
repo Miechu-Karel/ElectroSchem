@@ -35,7 +35,7 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 ICON_DIR = Path(__file__).resolve().parents[2] / "icons"
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
     def _make_view(self, sheet):
         view = SchematicView(project=self.project, settings=self.settings)
         view.on_change = self.record_history
+        view.on_routes_updated = self.refresh_last_route_snapshot
         view.on_selection = self._selection_changed
         view.on_edit_properties = self.show_component_properties
         view.load_sheet(sheet)
@@ -734,6 +735,26 @@ class MainWindow(QMainWindow):
             for index in range(self.tabs.count()):
                 self.tabs.widget(index).viewport().update()
         self._refresh_title()
+
+    def refresh_last_route_snapshot(self):
+        """Store derived async routes in the existing edit's undo snapshot."""
+        if not self._history:
+            return
+        current = deepcopy(self.project.to_dict())
+        previous = self._history[-1]
+        comparable = deepcopy(current)
+        previous_sheets = {sheet.get("id"): sheet for sheet in previous.get("sheets", [])}
+        for sheet in comparable.get("sheets", []):
+            old_sheet = previous_sheets.get(sheet.get("id"), {})
+            old_wires = {wire.get("id"): wire for wire in old_sheet.get("wires", [])}
+            for wire in sheet.get("wires", []):
+                old_wire = old_wires.get(wire.get("id"))
+                if old_wire is not None:
+                    wire["points"] = deepcopy(old_wire.get("points", []))
+        # Do not rewrite history if anything besides the computed paths changed
+        # while the worker ran; in that case the route result was already stale.
+        if comparable == previous:
+            self._history[-1] = current
 
     def undo(self):
         if len(self._history) < 2:
