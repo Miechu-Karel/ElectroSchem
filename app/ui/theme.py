@@ -4,7 +4,12 @@ from PySide6.QtCore import QSize
 
 
 def application_icon(directory):
-    """Let Qt select the supplied logo resolution for each window and DPI."""
+    """Load the Windows icon first, falling back to PNG sizes for older builds."""
+    ico_path = directory / "electroschem_icon.ico"
+    if ico_path.is_file():
+        icon = QIcon(str(ico_path))
+        if not icon.isNull():
+            return icon
     icon = QIcon()
     for size in (72,144,432,576):
         path = directory / f"electroschem_icon_{size}x{size}.png"

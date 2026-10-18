@@ -38,8 +38,10 @@ class MainWindowTests(unittest.TestCase):
         window = self.window
         self.assertEqual(APP_VERSION, "1.3.1")
         self.assertFalse(window.windowIcon().isNull())
-        self.assertEqual({size.width() for size in window.windowIcon().availableSizes()},
-                         {72,144,432,576})
+        self.assertEqual({(size.width(), size.height())
+                          for size in window.windowIcon().availableSizes()},
+                         {(16, 16), (24, 24), (32, 32), (48, 48),
+                          (64, 64), (128, 128), (256, 256)})
         self.assertEqual(window.tools_heading.text(), "BASIC TOOLS")
         self.assertTrue(window.ai_action.isEnabled())
         self.assertFalse(window.datasheet_action.isEnabled())
