@@ -69,6 +69,7 @@ class GitHubSync:
         try:
             result = subprocess.run(
                 ["git", "-C", str(self.local_folder), *args],
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 stdin=subprocess.DEVNULL, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=45, env=env,
                 check=False,

@@ -1,0 +1,26 @@
+R_DEF: Internal format may change without notice
+local
+drawable add_sheet
+drawable ai_features
+drawable cables
+drawable cursor
+drawable custom_components
+drawable delete
+drawable electronic_components
+drawable electroschem_icon_72x72
+drawable favorites
+drawable help
+drawable ic_library
+drawable interactive_components
+drawable measurement_tool
+drawable microcontrollers
+drawable paint_wire
+drawable pencil
+drawable properties
+drawable redo
+drawable reset_zoom
+drawable run_simulation
+drawable search
+drawable sensor
+drawable type
+drawable undo
