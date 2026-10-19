@@ -13,7 +13,7 @@ Version 1.4.0 promotes the tested 1.4.0rc2. Floating wire ends show a node
 unless connected to a component pin or another wire. It also includes the
 wire-color tool, local GitHub synchronization (commit on each project save;
 manual push/pull), and Google Drive/OneDrive setup guides. The portable
-Windows build is published on the [`build-v1.4.0` branch](https://github.com/Miechu-Karel/ElectroSchem/tree/build-v1.4.0).
+Windows build is published on the [`exports/v1.4.0` branch](https://github.com/Miechu-Karel/ElectroSchem/tree/exports/v1.4.0).
 See the [release notes](docs/RELEASE140.md), [GitHub setup guide](docs/GITHUB_SYNC.md),
 and [cloud setup guide](docs/CLOUD_SETUP.md).
 

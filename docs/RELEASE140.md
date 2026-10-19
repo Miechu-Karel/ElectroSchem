@@ -16,7 +16,7 @@ ElectroSchem 1.4.0 is the stable release promoted from 1.4.0rc2.
   it can fast-forward; each successful project save creates a commit, while
   push and manual pull remain user-controlled.
 - The portable Windows x64 build is available on the versioned
-  [`build-v1.4.0` branch](https://github.com/Miechu-Karel/ElectroSchem/tree/build-v1.4.0).
+  [`exports/v1.4.0` branch](https://github.com/Miechu-Karel/ElectroSchem/tree/exports/v1.4.0).
 
 ## Compatibility and setup
 
