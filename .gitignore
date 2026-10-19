@@ -11,3 +11,5 @@ node_modules/
 # Portable Windows releases belong to the biults branch, never main.
 /biult/
 /biults/
+Szablon Eksportu.json
+android/
