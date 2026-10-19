@@ -29,7 +29,7 @@ class Alpha131a1Tests(unittest.TestCase):
             APP.processEvents()
 
     def test_version_and_darker_dark_canvas(self):
-        self.assertEqual(APP_VERSION, "1.3.1")
+        self.assertEqual(APP_VERSION, "1.4.0")
         colours = canvas_colors(AppSettings(theme="dark"))
         self.assertEqual(colours["paper"], "#b9b9b9")
         self.assertEqual(colours["faint_paper"], "#b6b6b6")

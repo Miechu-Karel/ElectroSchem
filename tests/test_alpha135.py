@@ -30,7 +30,7 @@ APP=QApplication.instance() or QApplication([])
 
 class ModelTests(unittest.TestCase):
     def test_version_and_adjustable_battery_stable_id(self):
-        self.assertEqual(APP_VERSION,"1.3.1")
+        self.assertEqual(APP_VERSION,"1.4.0")
         battery=next(d for d in AVAILABLE_ITEMS if d.name=="Bateria")
         self.assertIn("9v",battery.id.lower()); self.assertEqual(behavior_for(battery).kind,"dc")
     def test_exercise13_declared_add_properties_normalized(self):

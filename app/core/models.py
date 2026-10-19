@@ -11,9 +11,9 @@ import json
 from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 from datetime import datetime
 
-# RC24 writes a new ELS package version so releases that only understand v1-v3
-# reject these files instead of silently opening a potentially incompatible save.
-FORMAT_VERSION = 4
+# ELS v5 adds schematic-only wire colors. Older releases reject these files
+# instead of silently discarding the new visual data when saving again.
+FORMAT_VERSION = 5
 PAPER_SIZES_MM = {"A0": (841, 1189), "A1": (594, 841), "A2": (420, 594),
                   "A3": (297, 420), "A4": (210, 297), "A5": (148, 210)}
 
@@ -55,6 +55,14 @@ class Wire:
     start_pin_number: str | None = None
     end_pin_number: str | None = None
     group_id: str | None = None
+    # Schematic-only appearance; never consumed by electrical simulation.
+    paint_color: str | None = None
+
+    def __post_init__(self):
+        if self.paint_color is not None and (
+                not isinstance(self.paint_color, str)
+                or not re.fullmatch(r"#[0-9A-Fa-f]{6}", self.paint_color)):
+            self.paint_color = None
 
 @dataclass
 class Annotation:

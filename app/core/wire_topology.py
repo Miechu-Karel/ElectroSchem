@@ -76,7 +76,10 @@ def merge_overlaps(sheet,seeds=(),minimum=20):
         created=[]
         for (a,b),owners in edges.items():
             group_ids={wires[i].group_id for i in owners}
-            wire=Wire(*a,*b,points=[list(a),list(b)],group_id=next(iter(group_ids)) if len(group_ids)==1 else None)
+            paint_colors={wires[i].paint_color for i in owners if wires[i].paint_color}
+            paint_color=next(iter(paint_colors)) if len(paint_colors)==1 else None
+            wire=Wire(*a,*b,points=[list(a),list(b)],group_id=next(iter(group_ids)) if len(group_ids)==1 else None,
+                      paint_color=paint_color)
             for side,p in (('start',a),('end',b)):
                 if anchors.get(p):
                     cid,index,number=anchors[p][0]

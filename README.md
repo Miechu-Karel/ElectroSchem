@@ -1,13 +1,30 @@
 # ElectroSchem
 
-**ElectroSchem 1.3.1** is a desktop editor for electronic schematics, built
+**ElectroSchem 1.4.0** is a desktop editor for electronic schematics, built
 with Python and PySide6 (Qt). Draw circuits, connect components and prepare
 documentation without a full PCB design environment.
 
 Create multi-sheet projects, use built-in symbols or define custom components,
 save projects in the **ELS** format and export to **PDF, PNG or SVG**.
 
-### Latest stable release 1.3.1
+### Latest stable release 1.4.0
+
+Version 1.4.0 promotes the tested 1.4.0rc2. Floating wire ends show a node
+unless connected to a component pin or another wire. It also includes the
+wire-color tool, local GitHub synchronization (commit on each project save;
+manual push/pull), and Google Drive/OneDrive setup guides. The portable
+Windows build is published on the [`biults/v1.4.0` branch](https://github.com/Miechu-Karel/ElectroSchem/tree/biults/v1.4.0).
+See the [release notes](docs/RELEASE140.md), [GitHub setup guide](docs/GITHUB_SYNC.md),
+and [cloud setup guide](docs/CLOUD_SETUP.md).
+
+### Release-candidate history: 1.4.0rc2 and 1.4.0rc1
+
+RC2 refreshes isolated-end markers after connection changes; RC1 removed
+Dropbox and Nextcloud, ordered the remaining cloud providers, and added a
+commit for each successful project save. See the [RC2 notes](docs/RC1402.md)
+and [RC1 notes](docs/RC1401.md).
+
+### Previous stable release 1.3.1
 
 Version 1.3.1 promotes the tested 1.3.1alfa1. Large schematic selections
 remain responsive during movement, with affected wires rerouted after release
@@ -24,6 +41,8 @@ See [1.3.0 release details](docs/RELEASE130.md).
 
 RC25 added the **Terminale** submenu under **Kable i złącza**. See
 [RC25 details](docs/RC1325.md).
+
+## Previous development versions
 
 ### Previous development version 1.3.0rc24
 

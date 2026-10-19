@@ -30,7 +30,7 @@ class ModelTests(unittest.TestCase):
             d=get_definition(b.add(name).library_id)
             self.assertEqual([p.name for p in d.pins],labels)
             self.assertEqual([p.number for p in d.pins],["1","2","3","4"])
-        self.assertEqual(APP_VERSION,"1.3.1")
+        self.assertEqual(APP_VERSION,"1.4.0")
 
     def test_unpowered_resistor_led_with_and_without_meter(self):
         for include_meter in (False,True):

@@ -133,7 +133,7 @@ class Alpha10Tests(unittest.TestCase):
         try:
             window.project.sheets=[example("dc")]; window._rebuild_tabs(); window.show_simulation(); sim=window.simulation_window
             before=deepcopy(window.project.to_dict())
-            self.assertIn("1.3.1",sim.windowTitle())
+            self.assertIn("1.4.0",sim.windowTitle())
             self.assertEqual(sim.windowIcon().cacheKey(),window.windowIcon().cacheKey())
             for theme in ("light","dark","light"):
                 window.settings.theme=theme; sim.refresh_theme(); window._current_view().apply_settings(window.settings)

@@ -228,7 +228,7 @@ class UITests(unittest.TestCase):
         self.assertEqual(d.parameters["sim_stimulus"],0); self.assertEqual(self.editor.project.to_dict(),before)
     def test_settings_tabs_toolbar_and_adjacent_adc_dac(self):
         dialog=SettingsDialog(self.editor.settings)
-        self.assertEqual(dialog.settings_tabs.count(),4); dialog.close(); dialog.deleteLater()
+        self.assertEqual(dialog.settings_tabs.count(),5); dialog.close(); dialog.deleteLater()
         self.assertIn(self.editor.ai_action,self.editor.toolbar.actions())
         self.assertEqual(self.editor.library_actions[-2].text().split(" (")[0],"Narzędzia pomiarowe")
         self.assertEqual(self.editor.library_actions[-1].text().split(" (")[0],"Elementy interaktywne")

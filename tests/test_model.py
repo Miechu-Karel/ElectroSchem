@@ -62,9 +62,9 @@ class ModelTests(unittest.TestCase):
                 saved_project = json.loads(package.read("project.json"))
             self.assertEqual(manifest["format_version"], FORMAT_VERSION)
             self.assertEqual(saved_project["format_version"], FORMAT_VERSION)
-            self.assertEqual(manifest["format_version"], 4)
-            # Simulate a release whose reader supports at most ELS v3.
-            with patch("app.core.project_file.FORMAT_VERSION", 3):
+            self.assertEqual(manifest["format_version"], 5)
+            # Simulate a release whose reader supports at most ELS v4.
+            with patch("app.core.project_file.FORMAT_VERSION", 4):
                 with self.assertRaisesRegex(ValueError, "Unsupported ELS package version"):
                     load_project(destination)
             restored = load_project(destination)

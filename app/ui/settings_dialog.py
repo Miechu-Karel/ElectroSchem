@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 import re
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, QRunnable, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget, QScrollArea, QTabWidget,
@@ -15,13 +15,34 @@ from PySide6.QtWidgets import (
 
 from app.core.settings import AppSettings, default_editor, detected_editors, documents_directory, file_dialog_directory, default_code_directory
 from app.ui.i18n import install_ui_language
+from app.ui.cloud_guide import cloud_guide_html
 from app.core.features import AI_AVAILABLE
+
+
+class _CloudConnectSignals(QObject):
+    progress = Signal(str)
+    finished = Signal(object, object)
+
+
+class _CloudConnectWorker(QRunnable):
+    def __init__(self, settings):
+        super().__init__()
+        self.settings = settings
+        self.signals = _CloudConnectSignals()
+
+    def run(self):
+        try:
+            from app.services.cloud_storage import authorize_provider
+            result = authorize_provider(self.settings, self.signals.progress.emit)
+            self.signals.finished.emit(result, None)
+        except Exception as error:
+            self.signals.finished.emit(self.settings.cloud_tokens, error)
 
 
 class SettingsDialog(QDialog):
     def __init__(self, settings: AppSettings, parent=None, first_run: bool = False):
         super().__init__(parent)
-        self._settings = replace(settings)
+        self._settings = replace(settings, cloud_tokens=deepcopy(settings.cloud_tokens))
         self.first_run = first_run
         self.setMinimumWidth(620)
         root_layout = QVBoxLayout(self)
@@ -152,7 +173,7 @@ class SettingsDialog(QDialog):
             pairs.append((row.labelItem.widget() if row.labelItem else None, row.fieldItem.widget()))
         self.settings_tabs=QTabWidget(); layout.addWidget(self.settings_tabs)
         self.tab_forms=[]; pages=[]
-        for _ in range(4):
+        for _ in range(5):
             page=QWidget(); page_layout=QVBoxLayout(page); form=QFormLayout()
             form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
             page_layout.addLayout(form); page_layout.addStretch()
@@ -178,6 +199,60 @@ class SettingsDialog(QDialog):
         self.scope_autoscale=QCheckBox(); self.scope_autoscale.setChecked(settings.scope_autoscale)
         self.scope_volts_label=QLabel(); self.scope_time_label=QLabel()
         self.tab_forms[3].addRow(self.scope_volts_label,self.scope_volts_div); self.tab_forms[3].addRow(self.scope_time_label,self.scope_time_div); self.tab_forms[3].addRow(self.scope_autoscale)
+        self.cloud_default = QComboBox()
+        self.cloud_default.addItem("", "local")
+        self.cloud_default.addItem("", "cloud")
+        self.cloud_default.setCurrentIndex(max(0, self.cloud_default.findData(settings.cloud_default_location)))
+        self.cloud_provider = QComboBox()
+        for label, key in (("No cloud", "none"), ("GitHub", "github"),
+                           ("Google Drive", "google_drive"), ("OneDrive", "onedrive")):
+            self.cloud_provider.addItem(label, key)
+        self.cloud_provider.setCurrentIndex(max(0, self.cloud_provider.findData(settings.cloud_provider)))
+        self.cloud_folder = QLineEdit(settings.cloud_folder); self.cloud_folder.setMaxLength(2048)
+        self.google_drive_client_id = QLineEdit(settings.google_drive_client_id); self.google_drive_client_id.setMaxLength(512)
+        self.google_drive_client_secret = QLineEdit(settings.google_drive_client_secret); self.google_drive_client_secret.setEchoMode(QLineEdit.EchoMode.Password); self.google_drive_client_secret.setMaxLength(2000)
+        self.onedrive_client_id = QLineEdit(settings.onedrive_client_id); self.onedrive_client_id.setMaxLength(512)
+        self.cloud_status = QLabel(); self.cloud_status.setWordWrap(True)
+        self.cloud_connect_button = QPushButton()
+        self.cloud_connect_button.clicked.connect(self._connect_cloud)
+        self._cloud_config_controls = [
+            self.cloud_default, self.cloud_provider, self.cloud_folder,
+            self.google_drive_client_id, self.google_drive_client_secret,
+            self.onedrive_client_id,
+        ]
+        cloud_page = pages[4].parentWidget()
+        self.cloud_form = QFormLayout()
+        cloud_page.layout().insertLayout(0, self.cloud_form)
+        self.cloud_form.addRow(self._cloud_label("Default project location", "Domyślne miejsce projektów"), self.cloud_default)
+        self.cloud_form.addRow(self._cloud_label("Cloud provider", "Dostawca chmury"), self.cloud_provider)
+        self.cloud_folder_label = self._cloud_label("Folder URL or path", "Link lub ścieżka folderu")
+        self.cloud_form.addRow(self.cloud_folder_label, self.cloud_folder)
+        self.google_id_label = self._cloud_label("Google OAuth client ID", "Identyfikator OAuth Google")
+        self.cloud_form.addRow(self.google_id_label, self.google_drive_client_id)
+        self.google_secret_label = self._cloud_label("Google OAuth client secret", "Sekret klienta OAuth Google")
+        self.cloud_form.addRow(self.google_secret_label, self.google_drive_client_secret)
+        self.onedrive_id_label = self._cloud_label("Microsoft application (client) ID", "Identyfikator aplikacji Microsoft")
+        self.cloud_form.addRow(self.onedrive_id_label, self.onedrive_client_id)
+        self.cloud_form.addRow(self.cloud_connect_button)
+        self.cloud_form.addRow(self.cloud_status)
+        self.github_heading = QLabel()
+        self.github_repository_url = QLineEdit(settings.github_repository_url)
+        self.github_repository_url.setMaxLength(2048)
+        self.github_branch = QLineEdit(settings.github_branch)
+        self.github_branch.setMaxLength(120)
+        self.github_repository_label = self._cloud_label("GitHub repository URL", "Adres repozytorium GitHub")
+        self.github_branch_label = self._cloud_label("Branch", "Gałąź")
+        self.cloud_form.addRow(self.github_heading)
+        self.cloud_form.addRow(self.github_repository_label, self.github_repository_url)
+        self.cloud_form.addRow(self.github_branch_label, self.github_branch)
+        self.github_note = QLabel(); self.github_note.setWordWrap(True)
+        self.github_note.setOpenExternalLinks(True)
+        self.cloud_form.addRow(self.github_note)
+        self._cloud_config_controls.extend((self.github_repository_url, self.github_branch))
+        self.cloud_note = QLabel(); self.cloud_note.setWordWrap(True); self.cloud_note.setOpenExternalLinks(True)
+        cloud_page.layout().insertWidget(1, self.cloud_note)
+        self.cloud_provider.currentIndexChanged.connect(self._cloud_provider_changed)
+        self._cloud_provider_changed()
         self.local_url=QLineEdit(settings.local_ai_url); self.local_url.setMaxLength(250)
         self.local_model=QLineEdit(settings.local_ai_model); self.local_model.setMaxLength(200)
         self.local_token=QLineEdit(settings.local_ai_token); self.local_token.setEchoMode(QLineEdit.EchoMode.Password); self.local_token.setMaxLength(2000)
@@ -231,6 +306,107 @@ class SettingsDialog(QDialog):
         self._rows[6].setText(self._t("OpenAI key", "Klucz OpenAI") if self._key_provider == "openai" else self._t("Gemini key", "Klucz Gemini"))
         self._local_note()
 
+    def _cloud_label(self, en, pl):
+        return QLabel(self._t(en, pl))
+
+    def _cloud_provider_changed(self):
+        provider = self.cloud_provider.currentData()
+        if provider == "none":
+            self.cloud_default.setCurrentIndex(self.cloud_default.findData("local"))
+        self.cloud_default.setEnabled(provider != "none")
+        self.cloud_default.setItemText(1, self._t("GitHub repository", "Repozytorium GitHub")
+                                       if provider == "github" else self._t("Cloud", "W chmurze"))
+        visible = {
+            "google_drive": (self.google_id_label, self.google_drive_client_id,
+                             self.google_secret_label, self.google_drive_client_secret),
+            "onedrive": (self.onedrive_id_label, self.onedrive_client_id),
+            "github": (self.github_heading, self.github_repository_label,
+                       self.github_repository_url, self.github_branch_label,
+                       self.github_branch, self.github_note),
+        }
+        for key, widgets in visible.items():
+            for widget in widgets:
+                self.cloud_form.setRowVisible(widget, key == provider)
+        self.cloud_form.setRowVisible(self.cloud_folder, provider not in {"none", "github"})
+        self.cloud_form.setRowVisible(self.cloud_connect_button, provider not in {"none", "github"})
+        self.cloud_form.setRowVisible(self.cloud_status, provider != "none")
+        connected = provider in self._settings.cloud_tokens
+        if provider == "github":
+            connected = bool(self.github_repository_url.text().strip() and self.github_branch.text().strip())
+        if provider == "github":
+            self.cloud_status.setText(self._t(
+                "GitHub repository configured; Git authentication is managed by Git." if connected else "Set a GitHub repository URL and branch.",
+                "Repozytorium GitHub skonfigurowane; logowaniem zarządza Git." if connected else "Ustaw adres repozytorium GitHub i gałąź."))
+        else:
+            self.cloud_status.setText(self._t("Account connected." if connected else "Account not connected.",
+                                              "Konto połączone." if connected else "Konto niepołączone."))
+        self.cloud_connect_button.setText(self._t("Connect / test connection", "Połącz / sprawdź połączenie"))
+        self.cloud_folder.setPlaceholderText({
+            "google_drive": "https://drive.google.com/drive/folders/…",
+            "onedrive": "https://1drv.ms/f/… or a OneDrive sharing link",
+        }.get(provider, ""))
+        self._update_cloud_guide()
+
+    def _update_cloud_guide(self):
+        self.cloud_note.setText(cloud_guide_html(
+            self.cloud_provider.currentData(), self.language.currentData()))
+
+    def _connect_cloud(self):
+        provider = self.cloud_provider.currentData()
+        if provider in {"none", "github"}:
+            return
+        required = {
+            "google_drive": self.google_drive_client_id.text().strip(),
+            "onedrive": self.onedrive_client_id.text().strip(),
+        }
+        if not self.cloud_folder.text().strip() or not required.get(provider):
+            QMessageBox.warning(self, self._t("Cloud storage", "Chmura"), self._t(
+                "Enter the folder and required provider credentials first.",
+                "Najpierw wpisz folder i wymagane dane wybranego dostawcy."))
+            return
+        from dataclasses import replace
+        candidate = replace(self._settings,
+            cloud_provider=self.cloud_provider.currentData(), cloud_folder=self.cloud_folder.text().strip(),
+            google_drive_client_id=self.google_drive_client_id.text().strip(),
+            google_drive_client_secret=self.google_drive_client_secret.text().strip(),
+            onedrive_client_id=self.onedrive_client_id.text().strip())
+        from PySide6.QtWidgets import QProgressDialog
+        self.cloud_connect_button.setEnabled(False)
+        for control in self._cloud_config_controls:
+            control.setEnabled(False)
+        progress = QProgressDialog(self._t("Connecting to cloud provider…", "Łączenie z dostawcą chmury…"), None, 0, 0, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        self._cloud_progress = progress
+        self._cloud_worker = _CloudConnectWorker(candidate)
+        self._cloud_worker.signals.progress.connect(progress.setLabelText)
+        self._cloud_worker.signals.finished.connect(self._cloud_connect_finished)
+        QThreadPool.globalInstance().start(self._cloud_worker)
+
+    def _cloud_connect_finished(self, result, error):
+        self.cloud_connect_button.setEnabled(True)
+        for control in self._cloud_config_controls:
+            control.setEnabled(True)
+        self._cloud_progress.close()
+        if error:
+            candidate = self._cloud_worker.settings
+            self._settings.cloud_tokens = deepcopy(candidate.cloud_tokens)
+            self.cloud_status.setText(self._t("Connection failed.", "Połączenie nie powiodło się."))
+            from app.services.cloud_storage import localized_cloud_error
+            QMessageBox.warning(self, self._t("Cloud storage", "Chmura"), localized_cloud_error(error, self.language.currentData()))
+            return
+        candidate = self._cloud_worker.settings
+        provider = candidate.cloud_provider
+        if result:
+            self._settings.cloud_tokens[provider] = result
+        self._settings.cloud_provider = provider
+        for name in ("cloud_folder", "google_drive_client_id", "google_drive_client_secret",
+                     "onedrive_client_id"):
+            setattr(self._settings, name, getattr(candidate, name))
+        self.cloud_status.setText(self._t("Account connected successfully.", "Konto połączono pomyślnie."))
+
+
     def _show_local_tutorial(self):
         from app.ui.local_ai_guide import LocalAIGuide
         LocalAIGuide(self.language.currentData(), self).exec()
@@ -259,8 +435,31 @@ class SettingsDialog(QDialog):
         for i,pair in enumerate((('Normal (480 × 260)','Normalny (480 × 260)'),('Large (640 × 350)','Duży (640 × 350)'),('Very large (800 × 440)','Bardzo duży (800 × 440)'))): self.scope_size.setItemText(i,self._t(*pair))
         self.stop_on_fault.setText(self._t('Stop simulation on component failure','Zatrzymaj symulację przy awarii elementu'))
         if hasattr(self,"settings_tabs"):
-            for index,pair in enumerate((("General","Ogólne"),("Editor and code","Edytor i kod"),("AI","AI"),("Simulation","Symulacja"))):
+            for index,pair in enumerate((("General","Ogólne"),("Editor and code","Edytor i kod"),("AI","AI"),("Simulation","Symulacja"),("Cloud","Chmura"))):
                 self.settings_tabs.setTabText(index,self._t(*pair))
+        self.cloud_default.setItemText(0, self._t("Local", "Lokalnie"))
+        self.cloud_default.setItemText(1, self._t("Cloud", "W chmurze"))
+        self.cloud_provider.setItemText(self.cloud_provider.findData("google_drive"), "Google Drive")
+        self.cloud_provider.setItemText(self.cloud_provider.findData("onedrive"), "OneDrive")
+        self.cloud_provider.setItemText(self.cloud_provider.findData("github"), "GitHub")
+        self.cloud_provider.setItemText(self.cloud_provider.findData("none"), self._t("No cloud", "Brak chmury"))
+        if self.cloud_provider.currentData() == "github":
+            self.cloud_default.setItemText(1, self._t("GitHub repository", "Repozytorium GitHub"))
+        self.cloud_folder_label.setText(self._t("Folder URL or path", "Link lub ścieżka folderu"))
+        self.google_id_label.setText(self._t("Google OAuth client ID", "Identyfikator OAuth Google"))
+        self.google_secret_label.setText(self._t("Google OAuth client secret", "Sekret klienta OAuth Google"))
+        self.onedrive_id_label.setText(self._t("Microsoft application (client) ID", "Identyfikator aplikacji Microsoft"))
+        self.cloud_connect_button.setText(self._t("Connect / test connection", "Połącz / sprawdź połączenie"))
+        self.github_heading.setText(self._t("GitHub project provider", "Dostawca projektów GitHub"))
+        self.github_repository_label.setText(self._t("GitHub repository URL", "Adres repozytorium GitHub"))
+        self.github_branch_label.setText(self._t("Branch", "Gałąź"))
+        self.github_repository_url.setPlaceholderText("https://github.com/user/repository.git")
+        self.github_branch.setPlaceholderText("main")
+        self.github_note.setText(
+            "<p>GitHub is a separate project provider backed by the local project folder configured under General settings. Clone the repository there (or point that folder at the clone), install Git, and sign in with Git Credential Manager or GitHub Desktop. Set <code>user.name</code> and <code>user.email</code> in Git. The selected branch is pulled in full at every application start using fast-forward only. Every successful <code>.els</code> save creates its own commit named with the file and local date/time; push is manual and sends all pending branch commits. Use File → GitHub for manual push or pull.</p>"
+            if self.language.currentData() != "pl" else
+            "<p>GitHub jest osobnym dostawcą projektów i korzysta z lokalnego folderu projektów ustawionego w zakładce Ogólne. Sklonuj tam repozytorium (albo ustaw ten folder na klon), zainstaluj Git i zaloguj się przez Git Credential Manager lub GitHub Desktop. Ustaw w Git <code>user.name</code> oraz <code>user.email</code>. Wybrana gałąź jest w całości pobierana przy każdym uruchomieniu, wyłącznie jako fast-forward. Każdy udany zapis pliku <code>.els</code> tworzy osobny commit z nazwą pliku oraz lokalną datą i godziną; ręczny push wysyła wszystkie oczekujące commity gałęzi. Push/pull jest w menu Plik → GitHub.</p>")
+        self._update_cloud_guide()
         self.provider.setItemText(self.provider.findData('none'), self._t("None", "Brak"))
         self.provider.setItemText(self.provider.findData('local'),self._t('Local AI (Ollama / LM Studio)','Lokalne AI (Ollama / LM Studio)'))
         self.provider_label.setText(self._t("AI provider", "Dostawca AI"))
@@ -337,7 +536,7 @@ class SettingsDialog(QDialog):
             try:
                 from app.services.local_ai import endpoint,body
                 endpoint(self.local_url.text()); body(self.local_model.text(),'','')
-            except ValueError as error:
+            except (ValueError, RuntimeError) as error:
                 from app.services.local_ai import localized_error
                 QMessageBox.warning(self,self._t('Local AI','Lokalne AI'),localized_error(str(error),self.language.currentData())); return
         openai_key = self._provider_keys.get("openai", "")
@@ -353,6 +552,30 @@ class SettingsDialog(QDialog):
         if AI_AVAILABLE and key and (not key.isascii() or any(character.isspace() for character in key)):
             QMessageBox.warning(self, "Gemini", self._t("The API key must contain ASCII characters without whitespace.", "Klucz API musi zawierać znaki ASCII bez białych znaków."))
             return
+        selected_cloud_provider = self.cloud_provider.currentData()
+        if (selected_cloud_provider not in {"none", "github"}
+                and self.cloud_default.currentData() == "cloud"
+                and not self.cloud_folder.text().strip()):
+            self.settings_tabs.setCurrentIndex(4)
+            QMessageBox.warning(self, self._t("Cloud storage", "Chmura"), self._t(
+                "Enter a cloud folder URL or path before selecting cloud as the default location.",
+                "Podaj link lub ścieżkę folderu, zanim ustawisz chmurę jako domyślne miejsce."))
+            return
+        github_repository_url = self.github_repository_url.text().strip()
+        github_branch = self.github_branch.text().strip() or "main"
+        if selected_cloud_provider == "github" and not github_repository_url:
+            self.settings_tabs.setCurrentIndex(4)
+            QMessageBox.warning(self, "GitHub", self._t(
+                "Enter a GitHub repository URL.", "Wpisz adres repozytorium GitHub."))
+            return
+        if github_repository_url:
+            try:
+                from app.services.github_sync import validate_branch, validate_github_remote
+                github_repository_url = validate_github_remote(github_repository_url)
+                github_branch = validate_branch(github_branch)
+            except (ValueError, RuntimeError) as error:
+                QMessageBox.warning(self, "GitHub", str(error))
+                return
         self._settings = AppSettings(
             language=self.language.currentData(), standard=self.standard.currentText(),
             paper_size=self.paper.currentText(), orientation=self.orientation.currentData(),
@@ -371,6 +594,16 @@ class SettingsDialog(QDialog):
             favorite_components=deepcopy(self._settings.favorite_components),
             default_directory=str(directory),
             default_code_directory=str(code_directory),
+            cloud_default_location=("local" if self.cloud_provider.currentData() == "none"
+                                    else self.cloud_default.currentData()),
+            cloud_provider=self.cloud_provider.currentData(),
+            cloud_folder=self.cloud_folder.text().strip(),
+            google_drive_client_id=self.google_drive_client_id.text().strip(),
+            google_drive_client_secret=self.google_drive_client_secret.text().strip(),
+            onedrive_client_id=self.onedrive_client_id.text().strip(),
+            github_repository_url=github_repository_url,
+            github_branch=github_branch,
+            cloud_tokens=deepcopy(self._settings.cloud_tokens),
             default_author=self.author.text().strip(), dramatic_faults=self.fault_effect.currentData()=="mega",
             fault_effect=self.fault_effect.currentData(),theme=self.theme.currentData(),
             window_mode=self.window_mode.currentData(),

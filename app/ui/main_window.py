@@ -11,11 +11,11 @@ from pathlib import Path
 from datetime import datetime
 import subprocess
 
-from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QIcon, QKeySequence, QCursor
+from PySide6.QtCore import QSize, Qt, QTimer, QObject, QRunnable, QThreadPool, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QKeySequence, QCursor
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow,
-    QMenu, QMessageBox, QStatusBar, QTabWidget, QToolBar, QToolButton,
+    QDialog, QDialogButtonBox, QDockWidget, QFileDialog, QColorDialog, QInputDialog, QLabel, QMainWindow,
+    QMenu, QMessageBox, QProgressDialog, QStatusBar, QTabWidget, QToolBar, QToolButton,
     QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QWidget, QComboBox,
 )
 
@@ -35,8 +35,62 @@ from app.canvas.page import drawing_regions, title_block_rect
 from app.ui.sheet_tabs import SheetTabBar
 from app.ui.shortcuts import EditorShortcuts
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 ICON_DIR = Path(__file__).resolve().parents[2] / "icons"
+
+
+class _CloudOperationSignals(QObject):
+    finished = Signal(object, object)
+
+
+class _CloudOperationWorker(QRunnable):
+    def __init__(self, settings, operation):
+        super().__init__()
+        self.settings = deepcopy(settings)
+        self.operation = operation
+        self.signals = _CloudOperationSignals()
+
+    def run(self):
+        try:
+            result = self.operation(self.settings)
+            self.signals.finished.emit((result, self.settings.cloud_tokens), None)
+        except Exception as error:
+            # Refresh-token rotation must survive even if the later API call
+            # fails (for example, because a cloud file was moved meanwhile).
+            self.signals.finished.emit((None, self.settings.cloud_tokens), error)
+
+
+class _GitHubOperationSignals(QObject):
+    finished = Signal(str, object, object)
+
+
+class _GitHubOperationWorker(QRunnable):
+    def __init__(self, settings, kind, file_path=None, project_name=""):
+        super().__init__()
+        self.settings = deepcopy(settings)
+        self.kind = kind
+        self.file_path = file_path
+        self.project_name = project_name
+        self.signals = _GitHubOperationSignals()
+
+    def run(self):
+        try:
+            from app.services.github_sync import GitHubSync
+            client = GitHubSync(
+                self.settings.default_directory,
+                self.settings.github_repository_url,
+                self.settings.github_branch,
+                noninteractive=self.kind == "startup_pull",
+            )
+            if self.kind in {"pull", "startup_pull"}:
+                result = client.pull()
+            elif self.kind == "push":
+                result = client.push()
+            else:
+                result = client.commit_file(self.file_path, self.project_name)
+            self.signals.finished.emit(self.kind, result, None)
+        except Exception as error:
+            self.signals.finished.emit(self.kind, None, error)
 
 # Kolejność odpowiada szkicowi oraz literom E/S/I/C/M w skrótach.
 LIBRARY_GROUPS = (
@@ -64,6 +118,13 @@ class MainWindow(QMainWindow):
         self.settings = settings if settings is not None else load_settings()
         self.project = self._empty_project()
         self.current_file: Path | None = None
+        self.current_cloud_file = None
+        self.current_cloud_provider = ""
+        self._cloud_busy = False
+        self._github_busy = False
+        self._github_queue = []
+        self._github_worker = None
+        self._github_progress = None
         self._history = []
         self._redo_history = []
         self._saved_state = deepcopy(self.project.to_dict())
@@ -86,6 +147,8 @@ class MainWindow(QMainWindow):
         self._translate_ui()
         from app.ui.theme import apply_theme
         apply_theme(self,self.settings)
+        if self.settings.cloud_provider == "github" and self.settings.github_repository_url:
+            QTimer.singleShot(0, lambda: self._queue_github_operation("startup_pull"))
         # Timer pokazuje konfigurację dopiero po uruchomieniu pętli zdarzeń.
         # Testy i narzędzia mogą jawnie wyłączyć ten jednorazowy dialog.
         if start_setup and not self.settings.setup_complete:
@@ -128,6 +191,10 @@ class MainWindow(QMainWindow):
         self.open_action = self._action("Open project…", "Otwórz projekt…", self.open_project, QKeySequence.StandardKey.Open)
         self.save_action = self._action("Save", "Zapisz", self.save_project, QKeySequence.StandardKey.Save)
         self.save_as_action = self._action("Save as…", "Zapisz jako…", self.save_project_as, QKeySequence.StandardKey.SaveAs)
+        self.quick_open_action = self._action("Open default project", "Otwórz domyślny projekt", self.open_default_location, "Alt+O")
+        self.quick_save_action = self._action("Save default project", "Zapisz domyślny projekt", self.save_default_location, "Alt+S")
+        self.github_pull_action = self._action("Pull from GitHub", "Pobierz z GitHuba", lambda: self._queue_github_operation("pull"))
+        self.github_push_action = self._action("Push to GitHub", "Wyślij do GitHuba", lambda: self._queue_github_operation("push"))
         self.save_asset_action = self._action("Save as Asset…", "Zapisz jako Asset…", self.save_as_asset)
         self.export_pdf_action = self._action("PDF", "PDF", self.export_pdf)
         self.export_png_action = self._action("PNG", "PNG", lambda: self._export("png"))
@@ -149,12 +216,13 @@ class MainWindow(QMainWindow):
                                       ("Paste (Ctrl+V)", "Wklej (Ctrl+V)", "paste"))]
         self.fit_page_action = self._action("Fit sheet", "Dopasuj arkusz", self.fit_current_page, icon="reset_zoom.png")
         self.select_action = self._action("Select (S)", "Zaznaczanie (S)", lambda: self.set_active_tool("select"), icon="cursor.png", checkable=True)
-        self.wire_action = self._action("Draw connections (D)", "Rysuj połączenia (D)", lambda: self.set_active_tool("wire"), icon="pencil.png", checkable=True)
         self.delete_action = self._action("Delete tool", "Narzędzie usuwania", lambda: self.set_active_tool("delete"), icon="delete.png", checkable=True)
+        self.paint_wire_action = self._action("Paint connected wires", "Maluj połączone przewody", lambda: self.set_active_tool("wire_color"), icon="paint_wire.png", checkable=True)
+        self.wire_action = self._action("Draw connections (D)", "Rysuj połączenia (D)", lambda: self.set_active_tool("wire"), icon="pencil.png", checkable=True)
         self.comment_action = self._action("Add comment (C)", "Dodaj komentarz (C)", lambda: self.set_active_tool("comment"), icon="type.png", checkable=True)
         self.tool_group = QActionGroup(self)
         self.tool_group.setExclusive(True)
-        for action in (self.select_action, self.wire_action, self.delete_action, self.comment_action):
+        for action in (self.select_action, self.delete_action, self.paint_wire_action, self.wire_action, self.comment_action):
             self.tool_group.addAction(action)
         self.select_action.setChecked(True)
         self.undo_action = self._action("Undo", "Cofnij", self.undo, QKeySequence.StandardKey.Undo, "undo.png")
@@ -185,13 +253,18 @@ class MainWindow(QMainWindow):
     def _create_menu(self):
         self.menuBar().clear()
         file_menu = self.menuBar().addMenu(self.t("File", "Plik"))
-        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action,self.save_asset_action])
+        file_menu.addActions([self.new_action, self.open_action, self.save_action, self.save_as_action])
+        file_menu.addSeparator()
+        file_menu.addActions([self.quick_open_action, self.quick_save_action, self.save_asset_action])
+        self.github_menu = file_menu.addMenu(self.t("GitHub", "GitHub"))
+        self.github_menu.addActions([self.github_pull_action, self.github_push_action])
         file_menu.addSeparator()
         export_menu = file_menu.addMenu(self.t("Export…", "Eksportuj…"))
         export_menu.addActions([self.export_pdf_action, self.export_png_action, self.export_svg_action])
         file_menu.addSeparator()
         file_menu.addAction(self.document_action)
         file_menu.addAction(self.exit_action)
+        self.github_menu.menuAction().setVisible(self.settings.cloud_provider == "github")
         edit_menu = self.menuBar().addMenu(self.t("Edit", "Edycja"))
         edit_menu.addActions(self.clipboard_actions)
         tools_menu = self.menuBar().addMenu(self.t("Tools", "Narzędzia"))
@@ -200,7 +273,7 @@ class MainWindow(QMainWindow):
         library.addActions(self.library_actions)
         tools_menu.addActions([self.custom_action, self.add_sheet_action, self.comment_action])
         tools_menu.addSeparator()
-        tools_menu.addActions([self.select_action, self.wire_action, self.delete_action, self.properties_action])
+        tools_menu.addActions([self.select_action, self.delete_action, self.paint_wire_action, self.wire_action, self.properties_action])
         tools_menu.addSeparator()
         tools_menu.addActions([self.undo_action, self.redo_action])
         tools_menu.addSeparator()
@@ -256,7 +329,7 @@ class MainWindow(QMainWindow):
         self.tools_heading.setFixedWidth(102)
         self.tools_heading.setStyleSheet("font-size: 10px; font-weight: bold; padding: 4px 0;")
         self.toolbar.addWidget(self.tools_heading)
-        self.toolbar.addActions([self.select_action, self.wire_action, self.delete_action, self.comment_action])
+        self.toolbar.addActions([self.select_action, self.delete_action, self.paint_wire_action, self.wire_action, self.comment_action])
         self.toolbar.addSeparator()
         self.toolbar.addActions([self.undo_action, self.redo_action])
         self.toolbar.addSeparator()
@@ -302,7 +375,7 @@ class MainWindow(QMainWindow):
         view.on_selection = self._selection_changed
         view.on_edit_properties = self.show_component_properties
         view.load_sheet(sheet)
-        view.set_tool(self._active_tool)
+        view.set_tool(self._active_tool, getattr(self.settings, "wire_paint_color", "#167d3d"))
         return view
 
     def _rebuild_tabs(self, selected=None):
@@ -570,6 +643,8 @@ class MainWindow(QMainWindow):
                                              paper_size=dialog.paper.currentText(),
                                              orientation=dialog.orientation.currentData(), standard=self.settings.standard)])
         self.current_file = None
+        self.current_cloud_file = None
+        self.current_cloud_provider = ""
         if self.settings.default_author:
             self.project.metadata["author"] = self.settings.default_author
         self._rebuild_tabs(selected=0)
@@ -592,11 +667,219 @@ class MainWindow(QMainWindow):
             self.ai_panel.new_chat()
         if getattr(self, "command_panel", None): self.command_panel.reset()
         self.current_file = Path(filename)
+        self.current_cloud_file = None
+        self.current_cloud_provider = ""
         self._rebuild_tabs(selected=0)
         self._reset_history()
         notice = self.project.metadata.get("migration_notice")
         if notice:
             QMessageBox.warning(self, self.t("Check migrated connections", "Sprawdź migrowane połączenia"), notice)
+
+    def open_default_location(self):
+        if self.settings.cloud_default_location == "cloud":
+            if self.settings.cloud_provider == "github":
+                return self.open_project()
+            return self.open_cloud_project()
+        return self.open_project()
+
+    def save_default_location(self):
+        if self.settings.cloud_default_location == "cloud":
+            if self.settings.cloud_provider == "github":
+                return self.save_github_project()
+            return self.save_cloud_project()
+        return self.save_project()
+
+    def save_github_project(self):
+        """Save into the configured local clone; the regular save hook commits it."""
+        if self.current_file is not None:
+            try:
+                current = self.current_file.resolve()
+                root = Path(self.settings.default_directory).expanduser().resolve()
+                if current.is_relative_to(root):
+                    return self._write_project(current)
+            except (OSError, ValueError):
+                pass
+        # Save dialog starts at the configured clone folder. If the user picks
+        # somewhere else the file still saves safely, but Git reports it was
+        # outside the repository and does not stage it.
+        return self.save_project_as()
+
+    def open_cloud_project(self):
+        if self._cloud_busy or not self._confirm_discard():
+            return
+        self._start_cloud_operation(lambda settings: __import__("app.services.cloud_storage", fromlist=["CloudStorageClient"]).CloudStorageClient(settings).list_projects(),
+                                    self._choose_cloud_project,
+                                    self.t("Loading cloud projects…", "Wczytywanie projektów z chmury…"))
+
+    def save_cloud_project(self):
+        if self._cloud_busy:
+            return
+        self._sync_positions()
+        from app.core.file_names import project_filename
+        existing = (self.current_cloud_file if self.current_cloud_provider == self.settings.cloud_provider else None)
+        default_name = existing.name if existing else project_filename(self.project.name, "els")
+        if existing:
+            name = existing.name
+        else:
+            name, accepted = QInputDialog.getText(self, self.t("Save cloud project", "Zapisz projekt w chmurze"),
+                                                  self.t("Project file name", "Nazwa pliku projektu"), text=default_name)
+            if not accepted or not name.strip():
+                return
+        snapshot = deepcopy(self.project.to_dict())
+        from app.core.models import Project
+        project = Project.from_dict(snapshot)
+        normalized_name = name.strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if not normalized_name.lower().endswith(".els"):
+            normalized_name += ".els"
+        file_id = existing.file_id if existing and normalized_name.casefold() == existing.name.casefold() else ""
+        provider = self.settings.cloud_provider
+        def upload(settings):
+            from app.core.project_file import project_bytes
+            from app.services.cloud_storage import CloudStorageClient
+            return CloudStorageClient(settings).upload(name, project_bytes(project), file_id)
+        def saved(entry):
+            self.current_file = None
+            self.current_cloud_file = entry
+            self.current_cloud_provider = provider
+            self._saved_state = snapshot
+            self._refresh_title()
+            self.statusBar().showMessage(self.t("Cloud project saved.", "Projekt zapisany w chmurze."), 3000)
+        self._start_cloud_operation(upload, saved, self.t("Saving cloud project…", "Zapisywanie projektu w chmurze…"))
+
+    def _choose_cloud_project(self, entries):
+        if not entries:
+            QMessageBox.information(self, self.t("Cloud projects", "Projekty w chmurze"),
+                                    self.t("No ElectroSchem projects were found in this folder.", "W tym folderze nie znaleziono projektów ElectroSchem."))
+            return
+        labels = [f"{index + 1}. {entry.name}" + (f" — {entry.modified}" if entry.modified else "")
+                  for index, entry in enumerate(entries)]
+        selected, accepted = QInputDialog.getItem(self, self.t("Open cloud project", "Otwórz projekt z chmury"),
+                                                  self.t("Choose a project", "Wybierz projekt"), labels, 0, False)
+        if not accepted:
+            return
+        entry = entries[labels.index(selected)]
+        provider = self.settings.cloud_provider
+        def download(settings):
+            from app.core.project_file import load_project_bytes
+            from app.services.cloud_storage import CloudStorageClient
+            client = CloudStorageClient(settings)
+            payload = client.download(entry)
+            return (load_project_bytes(payload), entry)
+        self._start_cloud_operation(download, lambda result: self._finish_open_cloud(result[0], result[1], provider),
+                                    self.t("Opening cloud project…", "Otwieranie projektu z chmury…"))
+
+    def _finish_open_cloud(self, project, entry, provider):
+        self.project = project
+        if self.ai_panel:
+            self.ai_panel.new_chat()
+        if getattr(self, "command_panel", None):
+            self.command_panel.reset()
+        self.current_file = None
+        self.current_cloud_file = entry
+        self.current_cloud_provider = provider
+        self._rebuild_tabs(selected=0)
+        self._reset_history()
+        notice = self.project.metadata.get("migration_notice")
+        if notice:
+            QMessageBox.warning(self, self.t("Check migrated connections", "Sprawdź migrowane połączenia"), notice)
+
+    def _start_cloud_operation(self, operation, on_success, message):
+        if self._cloud_busy:
+            return
+        self._cloud_busy = True
+        progress = QProgressDialog(message, None, 0, 0, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+        self._cloud_progress = progress
+        worker = _CloudOperationWorker(self.settings, operation)
+        self._cloud_worker = worker
+        worker.signals.finished.connect(lambda result, error: self._finish_cloud_operation(result, error, on_success))
+        QThreadPool.globalInstance().start(worker)
+
+    def _queue_github_operation(self, kind, file_path=None, project_name=""):
+        if not self.settings.github_repository_url:
+            QMessageBox.information(
+                self, "GitHub",
+                self.t("Set a GitHub repository URL in Settings → Cloud first.",
+                       "Najpierw ustaw adres repozytorium GitHub w Ustawienia → Chmura."),
+            )
+            return
+        self._github_queue.append((kind, file_path, project_name))
+        self._start_next_github_operation()
+
+    def _start_next_github_operation(self):
+        if self._github_busy or not self._github_queue:
+            return
+        kind, file_path, project_name = self._github_queue.pop(0)
+        self._github_busy = True
+        labels = {
+            "startup_pull": self.t("Checking GitHub for updates…", "Sprawdzanie aktualizacji na GitHubie…"),
+            "pull": self.t("Pulling GitHub updates…", "Pobieranie zmian z GitHuba…"),
+            "push": self.t("Pushing changes to GitHub…", "Wysyłanie zmian do GitHuba…"),
+            "commit": self.t("Committing saved project…", "Commitowanie zapisanego projektu…"),
+        }
+        self.statusBar().showMessage(labels.get(kind, "GitHub…"))
+        if kind in {"startup_pull", "pull", "push"}:
+            progress = QProgressDialog(labels.get(kind, "GitHub…"), None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(500)
+            progress.setCancelButton(None)
+            progress.show()
+            self._github_progress = progress
+        worker = _GitHubOperationWorker(self.settings, kind, file_path, project_name)
+        self._github_worker = worker
+        worker.signals.finished.connect(self._finish_github_operation)
+        QThreadPool.globalInstance().start(worker)
+
+    def _finish_github_operation(self, kind, result, error):
+        self._github_busy = False
+        self._github_worker = None
+        if self._github_progress is not None:
+            self._github_progress.close()
+            self._github_progress = None
+        if error:
+            message = str(error)
+            if kind == "startup_pull":
+                self.statusBar().showMessage(self.t("GitHub startup pull failed: ", "Automatyczny pull z GitHuba nie powiódł się: ") + message, 12000)
+            elif kind == "commit":
+                self.statusBar().showMessage(self.t("Project saved, but GitHub commit failed: ", "Projekt zapisany, ale commit GitHub nie powiódł się: ") + message, 12000)
+            else:
+                QMessageBox.warning(self, "GitHub", message)
+        elif kind == "commit":
+            if result == "committed":
+                self.statusBar().showMessage(self.t("Saved project committed locally. Push is still manual.", "Zapisany projekt zacommitowany lokalnie. Push nadal jest ręczny."), 5000)
+            elif result == "outside-repository":
+                self.statusBar().showMessage(self.t("Saved outside the configured Git repository; no commit was made.", "Zapisano poza skonfigurowanym repozytorium Git; commit nie powstał."), 8000)
+        elif kind == "startup_pull":
+            self.statusBar().showMessage(self.t("GitHub startup pull complete.", "Automatyczny pull z GitHuba zakończony."), 5000)
+        else:
+            QMessageBox.information(self, "GitHub", str(result or self.t("Operation complete.", "Operacja zakończona.")))
+        self._start_next_github_operation()
+
+    def _finish_cloud_operation(self, result, error, on_success):
+        self._cloud_busy = False
+        self._cloud_progress.close()
+        value, tokens = result if result is not None else (None, self.settings.cloud_tokens)
+        save_error = None
+        if tokens != self.settings.cloud_tokens:
+            self.settings.cloud_tokens = tokens
+            try:
+                save_settings(self.settings)
+            except OSError as settings_error:
+                save_error = settings_error
+        if error:
+            from app.services.cloud_storage import localized_cloud_error
+            message = localized_cloud_error(error, self.settings.language)
+            if save_error:
+                message += "\n" + self.t("Updated credentials could not be saved: ",
+                                          "Nie udało się zapisać odświeżonych danych logowania: ") + str(save_error)
+            self._error(message)
+            return
+        if save_error:
+            self._error(self.t("Cloud operation succeeded, but refreshed credentials could not be saved: ",
+                               "Operacja w chmurze się powiodła, ale nie udało się zapisać odświeżonych danych logowania: ") + str(save_error))
+        on_success(value)
 
     def _write_project(self, destination):
         self._sync_positions()
@@ -607,9 +890,14 @@ class MainWindow(QMainWindow):
             return False
         # Ścieżkę i stan zapisany zmieniamy dopiero po udanym atomowym zapisie.
         self.current_file = Path(destination).with_suffix(".els")
+        self.current_cloud_file = None
+        self.current_cloud_provider = ""
         self._saved_state = deepcopy(self.project.to_dict())
         self._refresh_title()
         self.statusBar().showMessage(self.t("Project saved.", "Projekt zapisany."), 2500)
+        if self.settings.cloud_provider == "github" and self.settings.github_repository_url:
+            self._github_queue.append(("commit", str(self.current_file), self.project.name))
+            self._start_next_github_operation()
         return True
 
     def save_project(self):
@@ -655,9 +943,24 @@ class MainWindow(QMainWindow):
 
     def set_active_tool(self, tool):
         self._active_tool = tool
-        self._current_view().set_tool(tool)
+        paint_color = getattr(self.settings, "wire_paint_color", "#167d3d")
+        if tool == "wire_color":
+            selected = QColorDialog.getColor(
+                QColor(paint_color), self,
+                "Kolor połączenia" if self.settings.language == "pl" else "Wire color")
+            if selected.isValid():
+                paint_color = selected.name(QColor.NameFormat.HexRgb)
+                self.settings.wire_paint_color = paint_color
+                try:
+                    save_settings(self.settings)
+                except (OSError, ValueError) as error:
+                    self.statusBar().showMessage(
+                        self.t("Color will be remembered for this session only: ",
+                               "Kolor zostanie zapamiętany tylko w tej sesji: ") + str(error), 5000)
+        self._current_view().set_tool(tool, paint_color)
         labels = {
             "select": ("Select / move; double-click for properties.", "Zaznacz / przesuń; dwuklik otwiera właściwości."),
+            "wire_color": ("Click a wire to paint its unbranched connected cable.", "Kliknij przewód, aby pomalować jego nierozgałęzioną trasę."),
             "wire": ("Click pins to connect. Right-click cancels drawing.", "Klikaj piny, aby połączyć. PPM anuluje rysowanie."),
             "delete": ("Click an item to remove it. X activates this tool; Delete removes the selection.", "Kliknij obiekt do usunięcia. X włącza to narzędzie; Del usuwa zaznaczenie."),
             "comment": ("Click the sheet to add an Arial comment.", "Kliknij arkusz, aby dodać komentarz czcionką Arial."),

@@ -110,10 +110,18 @@ class WireItem(QGraphicsPathItem):
 
     def paint(self, painter, option, widget=None):
         painter.save()
-        painter.setPen(QPen(QColor(getattr(self,"selected_color","#df6b45") if self.isSelected() else getattr(self,"ink_color","#167d3d")), 2))
+        if self.isSelected():
+            color=QColor(getattr(self,"selected_color","#df6b45"))
+        else:
+            color=QColor(getattr(self,"ink_color","#167d3d"))
+            custom=getattr(self,"paint_color",None)
+            if isinstance(custom,str) and custom:
+                candidate=QColor(custom)
+                if candidate.isValid(): color=candidate
+        painter.setPen(QPen(color, 2))
         painter.drawPath(self.path())
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(getattr(self,"ink_color","#167d3d")))
+        painter.setBrush(color)
         for show,point in zip(getattr(self,"endpoint_dots",(True,True)),(self.points[0], self.points[-1])):
             if show: painter.drawEllipse(point, 3, 3)
         painter.restore()
@@ -133,6 +141,7 @@ class SchematicView(QGraphicsView):
         self.setMouseTracking(True)
         self._component_items, self._wire_items, self._comment_items = {}, {}, {}
         self.tool = "select"
+        self.wire_paint_color = getattr(settings, "wire_paint_color", "#167d3d")
         self._show_hidden_wires=False
         self._wire_start = self._wire_preview = self._dragged_wire_end = None
         self._wire_press_scene = None
@@ -257,11 +266,15 @@ class SchematicView(QGraphicsView):
             item.ink_color=colours["wire"]; item.selected_color=colours["selected"]; item.update()
         for item in self._comment_items.values(): item.setDefaultTextColor(QColor(colours["ink"]))
 
-    def set_tool(self, tool):
+    def set_tool(self, tool, paint_color=None):
         if self._group_drag:
             self._move_selection_group(QPointF())
             self._group_drag = None
         self.tool = tool
+        if paint_color is not None:
+            candidate = QColor(paint_color)
+            if candidate.isValid():
+                self.wire_paint_color = candidate.name(QColor.NameFormat.HexRgb)
         self._clear_wire_preview()
         # Zaznaczanie prostokątem jest przypisane do PPM, więc Qt nie może
         # przechwytywać LPM własnym RubberBandDrag.
@@ -306,6 +319,7 @@ class SchematicView(QGraphicsView):
             self._add_comment_item(comment)
         self._join_coincident_ends()
         self._refresh_attached_wires()
+        self._refresh_wire_endpoint_dots()
         self.scene.blockSignals(False)
         self._loading = False
         from app.ui.usb_cable import EditorCables
@@ -350,6 +364,7 @@ class SchematicView(QGraphicsView):
                 self._component_items[component_id].setSelected(selected)
             if getattr(self,'cable_layer',None): self.cable_layer.refresh(component_id)
             self._refresh_attached_wires()
+            self._refresh_wire_endpoint_dots()
         self.viewport().update()
 
     def add_component(self, library_id, global_pos=None):
@@ -394,6 +409,7 @@ class SchematicView(QGraphicsView):
         item = WireItem(points)
         colours=canvas_colors(self.settings)
         item.ink_color=colours["wire"]; item.selected_color=colours["selected"]
+        item.paint_color=wire.paint_color
         item.setData(0, "wire")
         item.setData(1, wire.id)
         self._wire_items[wire.id] = item
@@ -497,7 +513,8 @@ class SchematicView(QGraphicsView):
                 continue
             tail = Wire(point.x(), point.y(), wire.end_x, wire.end_y,
                         end_component_id=wire.end_component_id, end_pin_index=wire.end_pin_index,
-                        end_pin_number=wire.end_pin_number, end_junction_id=wire.end_junction_id,group_id=wire.group_id)
+                        end_pin_number=wire.end_pin_number, end_junction_id=wire.end_junction_id,group_id=wire.group_id,
+                        paint_color=wire.paint_color)
             before, after = vertices[:segment+1]+[point], [point]+vertices[segment+1:]
             # Jeżeli węzeł trafił dokładnie w zakręt, usuń jego powtórzenie.
             before = [p for i,p in enumerate(before) if i == 0 or p != before[i-1]]
@@ -533,50 +550,202 @@ class SchematicView(QGraphicsView):
             self._add_wire_item(wire)
         self._join_coincident_ends()
         self._refresh_attached_wires()
+        self._refresh_wire_endpoint_dots()
         return True
 
     def _join_coincident_ends(self):
+        all_ends = list(self._ends())
         groups = {}
-        for wire, side in self._ends():
+        for wire, side in all_ends:
             point = self._end_point(wire, side)
             groups.setdefault((round(point.x(), 4), round(point.y(), 4)), []).append((wire, side))
         for ends in groups.values():
             if len(ends) < 2:
                 continue
-            old = {getattr(w, s+"_junction_id") for w, s in ends} - {None}
+            old = {getattr(w, s+"_junction_id") for w, s in ends} - {None, ""}
             junction = sorted(old)[0] if old else new_id()
             # Scala ID także gdy oba węzły były już większymi grupami.
-            for w, s in self._ends():
+            for w, s in all_ends:
                 if getattr(w, s+"_junction_id") in old:
                     setattr(w, s+"_junction_id", junction)
             for w, s in ends:
                 setattr(w, s+"_junction_id", junction)
-        for wire in self._sheet.wires:
-            item=self._wire_items.get(wire.id)
-            if item:
-                flags=[]
-                for side in ("start","end"):
-                    point=self._end_point(wire,side); ends=groups.get((round(point.x(),4),round(point.y(),4)),[])
-                    directions=[]
-                    for w,s in ends:
-                        vertices=w.points or [[w.start_x,w.start_y],[w.end_x,w.end_y]]
-                        # Malformed/legacy zero-length wires can contain only
-                        # one vertex. They have no outgoing direction, but must
-                        # not abort a mouse-release handler for the whole sheet.
-                        if len(vertices)<2:
-                            continue
-                        neighbour=QPointF(*(vertices[1] if s=="start" else vertices[-2]))
-                        delta=neighbour-point
-                        if delta.manhattanLength()>.001:
-                            length=(delta.x()**2+delta.y()**2)**.5
-                            unit=(round(delta.x()/length,5),round(delta.y()/length,5))
-                            if unit not in directions: directions.append(unit)
-                    # Show branch nodes and genuinely floating wire ends.
-                    # A shared two-direction bend or a component-pin endpoint
-                    # is connected already and therefore needs no endpoint dot.
-                    floating_end = len(ends)==1 and not getattr(wire,side+"_component_id")
-                    flags.append(len(directions)>=3 or floating_end)
-                item.endpoint_dots=tuple(flags); item.update()
+        self._refresh_wire_endpoint_dots()
+
+    def _refresh_wire_endpoint_dots(self):
+        """Refresh free-end markers without creating new electrical joins."""
+        ends = list(self._ends())
+        if not ends:
+            return
+        parents = list(range(len(ends)))
+
+        def root(index):
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]
+                index = parents[index]
+            return index
+
+        def union(first, second):
+            first_root, second_root = root(first), root(second)
+            if first_root != second_root:
+                parents[second_root] = first_root
+
+        coordinate_owner, junction_owner = {}, {}
+        for index, (wire, side) in enumerate(ends):
+            point = self._end_point(wire, side)
+            coordinate = (round(point.x(), 4), round(point.y(), 4))
+            if coordinate in coordinate_owner:
+                union(index, coordinate_owner[coordinate])
+            else:
+                coordinate_owner[coordinate] = index
+            junction = getattr(wire, side + "_junction_id")
+            if junction:
+                if junction in junction_owner:
+                    union(index, junction_owner[junction])
+                else:
+                    junction_owner[junction] = index
+
+        nodes = {}
+        for index, endpoint in enumerate(ends):
+            nodes.setdefault(root(index), []).append(endpoint)
+
+        for index, (wire, side) in enumerate(ends):
+            item = self._wire_items.get(wire.id)
+            if item is None:
+                continue
+            node_ends = nodes[root(index)]
+            directions = []
+            for neighbour_wire, neighbour_side in node_ends:
+                point = self._end_point(neighbour_wire, neighbour_side)
+                vertices = neighbour_wire.points or [
+                    [neighbour_wire.start_x, neighbour_wire.start_y],
+                    [neighbour_wire.end_x, neighbour_wire.end_y],
+                ]
+                # Malformed/legacy zero-length wires have no outgoing segment.
+                if len(vertices) < 2:
+                    continue
+                neighbour = QPointF(*(vertices[1] if neighbour_side == "start" else vertices[-2]))
+                delta = neighbour - point
+                if delta.manhattanLength() > .001:
+                    length = (delta.x() ** 2 + delta.y() ** 2) ** .5
+                    direction = (round(delta.x() / length, 5), round(delta.y() / length, 5))
+                    if direction not in directions:
+                        directions.append(direction)
+
+            component_id = getattr(wire, side + "_component_id")
+            pin_index = getattr(wire, side + "_pin_index")
+            component_item = self._component_items.get(component_id)
+            attached_to_pin = (
+                component_item is not None
+                and isinstance(pin_index, int)
+                and 0 <= pin_index < len(component_item.pin_positions())
+            )
+            floating_end = len(node_ends) == 1 and not attached_to_pin
+            flags = list(getattr(item, "endpoint_dots", (True, True)))
+            flags[0 if side == "start" else 1] = len(directions) >= 3 or floating_end
+            item.endpoint_dots = tuple(flags)
+            item.update()
+
+    def _paint_wire_chain(self, first_wire, color):
+        """Paint a cable chain using both saved junction IDs and visible endpoints.
+
+        Old projects can retain a shared junction ID after endpoint coordinates
+        drift slightly, while legacy routed points may not exactly match their
+        model endpoints. Treat either representation as the same contact.
+        """
+        by_id = {wire.id: wire for wire in self._sheet.wires}
+        if first_wire.id not in by_id:
+            return False
+
+        ends = list(self._ends())
+        parent = list(range(len(ends)))
+        def root(index):
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+        def union(first, second):
+            a, b = root(first), root(second)
+            if a != b:
+                parent[b] = a
+
+        coordinates, junctions, end_indices = {}, {}, {}
+        aliases = {}
+        for index, (wire, side) in enumerate(ends):
+            end_indices[(wire.id, side)] = index
+            point = self._end_point(wire, side)
+            visible = wire.points[0 if side == "start" else -1] if wire.points else None
+            points = [point]
+            if visible is not None:
+                points.append(QPointF(*visible))
+            aliases[index] = points
+            for candidate in points:
+                key = (round(candidate.x(), 4), round(candidate.y(), 4))
+                if key in coordinates:
+                    union(index, coordinates[key])
+                else:
+                    coordinates[key] = index
+            junction = getattr(wire, side + "_junction_id")
+            if junction:
+                if junction in junctions:
+                    union(index, junctions[junction])
+                else:
+                    junctions[junction] = index
+
+        node_wires, node_pins = {}, set()
+        for index, (wire, side) in enumerate(ends):
+            node = root(index)
+            node_wires.setdefault(node, set()).add(wire.id)
+            if getattr(wire, side + "_component_id"):
+                node_pins.add(node)
+
+        candidate = QColor(color)
+        if not candidate.isValid():
+            return False
+        color = candidate.name(QColor.NameFormat.HexRgb)
+        # Each direction is walked independently from the selected wire.
+        # Once a neighbouring cable is entered, do not walk back through the
+        # same junction: inspect only its far endpoint, where the next
+        # decision is made (pin / one continuation / branch).
+        pending = [(first_wire.id, None)]
+        visited_states = set()
+        painted = set()
+        while pending:
+            wire_id, entered_at = pending.pop()
+            state = (wire_id, entered_at)
+            if state in visited_states:
+                continue
+            visited_states.add(state)
+            wire = by_id.get(wire_id)
+            if wire is None:
+                continue
+            if wire_id not in painted:
+                painted.add(wire_id)
+                wire.paint_color = color
+                item = self._wire_items.get(wire_id)
+                if item is not None:
+                    item.paint_color = color
+                    item.update()
+            for side in ("start", "end"):
+                index = end_indices.get((wire_id, side))
+                if index is None:
+                    continue
+                node = root(index)
+                if entered_at == node:
+                    continue
+                if getattr(wire, side + "_component_id"):
+                    continue
+                if node in node_pins:
+                    continue
+                neighbours = node_wires.get(node, set()) - {wire_id}
+                if len(neighbours) == 1:
+                    neighbour = next(iter(neighbours))
+                    neighbour_ends = [end_indices[(neighbour, endpoint)]
+                                      for endpoint in ("start", "end")
+                                      if root(end_indices[(neighbour, endpoint)]) == node]
+                    if neighbour_ends:
+                        pending.append((neighbour, node))
+        return bool(painted)
 
     def _routes_after_movement(self, wires, wire_ids):
         """Return the shortest legal routes for moved wires against the new layout."""
@@ -760,6 +929,7 @@ class SchematicView(QGraphicsView):
         if join: self._join_coincident_ends()
         if refresh:
             attached.update(self._refresh_attached_wires())
+            self._refresh_wire_endpoint_dots()
         return attached
 
     def _nearest_wire_endpoint(self, point):
@@ -825,6 +995,13 @@ class SchematicView(QGraphicsView):
             event.accept()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            if self.tool == "wire_color":
+                if item is not None and item.data(0) == "wire":
+                    wire=next((candidate for candidate in self._sheet.wires if candidate.id==item.data(1)),None)
+                    if wire is not None and self._paint_wire_chain(wire, self.wire_paint_color):
+                        self._changed()
+                event.accept()
+                return
             if self.tool == "select":
                 if isinstance(item,ComponentItem):
                     self._wire_gesture_points={w.id:deepcopy(w.points) for w in self._sheet.wires}
@@ -994,6 +1171,7 @@ class SchematicView(QGraphicsView):
                     changed_wire_ids.update(self._refresh_attached_wires(defer_routing=True))
                 else:
                     changed_wire_ids = self._attach_free_wire_ends_to_component_pins(join=False)
+                self._refresh_wire_endpoint_dots()
                 self._changed()
                 if deferred_routes:
                     self._schedule_wire_routes(moved_wire_ids | changed_wire_ids)
@@ -1033,6 +1211,7 @@ class SchematicView(QGraphicsView):
             self._dragged_wire_end = None
             self._join_coincident_ends()
             self._refresh_attached_wires()
+            self._refresh_wire_endpoint_dots()
             self._changed()
             self._wire_gesture_points={}
             event.accept()
@@ -1040,6 +1219,7 @@ class SchematicView(QGraphicsView):
         super().mouseReleaseEvent(event)
         if self._sync_component_positions():
             self._attach_free_wire_ends_to_component_pins(join=False)
+            self._refresh_wire_endpoint_dots()
             self._changed()
         self._wire_gesture_points={}
 
@@ -1316,6 +1496,10 @@ class SchematicView(QGraphicsView):
         else:
             return
         self.scene.removeItem(item)
+        # Detaching a component or deleting one branch changes which wire
+        # endpoints are floating. Refresh their junction markers immediately
+        # instead of leaving the old pin/branch dots on the scene.
+        self._join_coincident_ends()
         self._selection_changed()
 
     def _selection_changed(self):
@@ -1368,6 +1552,7 @@ class SchematicView(QGraphicsView):
         if changed:
             self._sync_component_positions()
             self._refresh_attached_wires()
+            self._refresh_wire_endpoint_dots()
             self._changed()
 
     def _sync_component_positions(self):
@@ -1426,6 +1611,7 @@ class SchematicView(QGraphicsView):
         self._normalize_wire_junctions()
         self._join_coincident_ends()
         self._refresh_attached_wires()
+        self._refresh_wire_endpoint_dots()
         self._changed()
         return True
 

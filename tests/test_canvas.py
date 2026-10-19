@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.canvas.component_item import ComponentItem
 from app.canvas.schematic_view import SchematicView
-from app.core.models import ComponentInstance, Project, Wire
+from app.core.models import ComponentInstance, Project, Sheet, Wire
 from app.core.settings import AppSettings
 from app.libraries.built_in import BUILT_IN_ITEMS
 
@@ -71,7 +71,77 @@ class CanvasTests(unittest.TestCase):
         self.assertEqual((self.component.x,self.component.y),(360,300))
         self.assertEqual(wire.start_component_id,self.component.id)
         self.assertEqual(wire.start_pin_index,1)
+        self.assertEqual(self.view._wire_items[wire.id].endpoint_dots, (False, True))
         self.assertEqual(len(changed),1)
+
+    def test_open_end_gets_node_again_when_its_neighboring_wire_is_deleted(self):
+        first = Wire(100, 300, 200, 300, points=[[100, 300], [200, 300]])
+        second = Wire(200, 300, 300, 300, points=[[200, 300], [300, 300]])
+        self.sheet.wires.extend((first, second))
+        self.view._add_wire_item(first)
+        self.view._add_wire_item(second)
+        self.view._join_coincident_ends()
+        self.assertEqual(self.view._wire_items[first.id].endpoint_dots, (True, False))
+        self.assertEqual(self.view._wire_items[second.id].endpoint_dots, (False, True))
+
+        self.view._delete_item(self.view._wire_items[second.id])
+
+        self.assertEqual(self.view._wire_items[first.id].endpoint_dots, (True, True))
+
+    def test_end_with_missing_pin_anchor_is_shown_as_floating(self):
+        wire = Wire(100, 300, 200, 300,
+                    start_component_id=self.component.id, start_pin_index=99)
+        wire.points = [[100, 300], [200, 300]]
+        self.sheet.wires.append(wire)
+        self.view._add_wire_item(wire)
+
+        self.view._join_coincident_ends()
+
+        self.assertEqual(self.view._wire_items[wire.id].endpoint_dots, (True, True))
+
+    def test_shared_junction_id_hides_dots_even_if_legacy_coordinates_drift(self):
+        first = Wire(100, 300, 200, 300, points=[[100, 300], [200, 300]])
+        second = Wire(200.1, 300, 300, 300, points=[[200.1, 300], [300, 300]])
+        first.end_junction_id = second.start_junction_id = "legacy-shared-node"
+        self.view.load_sheet(Sheet(wires=[first, second]))
+
+        self.assertEqual(self.view._wire_items[first.id].endpoint_dots, (True, False))
+        self.assertEqual(self.view._wire_items[second.id].endpoint_dots, (False, True))
+
+    def test_removing_component_turns_its_wire_pin_end_into_a_floating_node(self):
+        pin = self.view._component_items[self.component.id].pin_positions()[0]
+        wire = Wire(pin.x(), pin.y(), 200, 200,
+                    start_component_id=self.component.id, start_pin_index=0)
+        self.sheet.wires.append(wire)
+        self.view._add_wire_item(wire)
+        self.view._join_coincident_ends()
+        self.assertFalse(self.view._wire_items[wire.id].endpoint_dots[0])
+
+        self.view._delete_item(self.view._component_items[self.component.id])
+
+        self.assertIsNone(wire.start_component_id)
+        self.assertTrue(self.view._wire_items[wire.id].endpoint_dots[0])
+        self.assertTrue(self.view._wire_items[wire.id].endpoint_dots[1])
+
+    def test_dragging_pin_attached_end_to_empty_space_shows_floating_node(self):
+        pin = self.view._component_items[self.component.id].pin_positions()[0]
+        wire = Wire(pin.x(), pin.y(), 200, 200,
+                    start_component_id=self.component.id, start_pin_index=0)
+        wire.points = [[pin.x(), pin.y()], [200, 200]]
+        self.sheet.wires.append(wire)
+        self.view._add_wire_item(wire)
+        self.view._join_coincident_ends()
+        self.assertFalse(self.view._wire_items[wire.id].endpoint_dots[0])
+        start = self.view.mapFromScene(pin)
+        target = self.view.mapFromScene(QPointF(160, 160))
+
+        QTest.mousePress(self.view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(self.view.viewport(), target, 30)
+        QTest.mouseRelease(self.view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+        APP.processEvents()
+
+        self.assertIsNone(wire.start_component_id)
+        self.assertTrue(self.view._wire_items[wire.id].endpoint_dots[0])
 
     def test_right_click_cancels_wire_and_does_not_delete(self):
         self.view.set_tool("wire")

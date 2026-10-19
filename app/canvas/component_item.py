@@ -70,6 +70,10 @@ class ComponentItem(QGraphicsObject):
         # to na pole zaznaczenia (shape() używa dokładnego _hit_rect), ale
         # chroni QGraphicsView przed obcięciem/artefaktami po odświeżeniu.
         rect=self._hit_rect.adjusted(-10, -10, 10, 10)
+        if self.definition.symbol == "motor":
+            # Motor pin labels sit outside the symbol body, but must still be
+            # included in the repaint bounds without enlarging its hit box.
+            rect=rect.united(QRectF(-120,-40,240,80))
         if self.asset_case:
             from app.canvas.case_shapes import outline
             body,strokes=outline(self.asset_case['shapes'])
@@ -279,26 +283,6 @@ class ComponentItem(QGraphicsObject):
         p.setBrush(QColor(getattr(self, "paper_color", "#ffffff")))
         p.drawRect(body)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        if d.name == "Czujnik Płomienia":
-            p.save()
-            p.setPen(QPen(QColor("#123a28"),1.5)); p.setBrush(QColor("#267247"))
-            p.drawRoundedRect(body,5,5)
-            p.setBrush(QColor("#111820")); p.setPen(QPen(QColor("#71808a"),1.5))
-            lens=QRectF(body.left()+10,body.center().y()-20,40,40); p.drawEllipse(lens)
-            p.setBrush(QColor("#392944")); p.setPen(QPen(QColor("#b878d1"),1))
-            p.drawEllipse(lens.adjusted(8,8,-8,-8))
-            p.setBrush(QColor("#17232c")); p.setPen(QPen(QColor("#0d1720"),1))
-            chip=QRectF(body.left()+62,body.top()+14,34,29); p.drawRoundedRect(chip,2,2)
-            for offset in (6,13,20,27):
-                p.drawLine(QPointF(chip.left()-4,chip.top()+offset),QPointF(chip.left(),chip.top()+offset))
-                p.drawLine(QPointF(chip.right(),chip.top()+offset),QPointF(chip.right()+4,chip.top()+offset))
-            p.setBrush(QColor("#d3b554")); p.setPen(QPen(QColor("#795e25"),1))
-            p.drawEllipse(QPointF(body.right()-23,body.center().y()),10,10)
-            p.drawLine(QPointF(body.right()-29,body.center().y()),QPointF(body.right()-17,body.center().y()))
-            lit=self.component.properties.get("sim_flame_detected")=="true"
-            p.setPen(QPen(QColor("#ff503c" if lit else "#82463f"),1)); p.setBrush(QColor("#ff503c" if lit else "#552d2b"))
-            p.drawEllipse(QPointF(body.right()-48,body.top()+15),4,4)
-            p.restore()
         font = QFont("Arial")
         font.setPixelSize(10)
         p.setFont(font)
@@ -446,9 +430,11 @@ class ComponentItem(QGraphicsObject):
                 self._arrow(p,QPointF(0,y-8),QPointF(11,y-19),3.5)
             line(40,-40,40,40); line(40,0,80,0)
         elif s == "motor":
-            p.drawEllipse(QRectF(-24,-24,48,48))
+            servo = len(self.definition.pins) == 3
+            motor_x = 30 if servo else 0
+            p.drawEllipse(QRectF(motor_x-24,-24,48,48))
             font=QFont("Arial"); font.setPixelSize(20); p.setFont(font)
-            p.drawText(QRectF(-20,-19,40,38),Qt.AlignmentFlag.AlignCenter,"M")
+            p.drawText(QRectF(motor_x-20,-19,40,38),Qt.AlignmentFlag.AlignCenter,"M")
             if len(self.definition.pins)==4:
                 # Uzwojenia bipolarnego silnika krokowego są odseparowane.
                 for sign in (-1,1):
@@ -458,22 +444,43 @@ class ComponentItem(QGraphicsObject):
                     for y in (-20,-10,0,10):
                         path.cubicTo(x+sign*12,y,x+sign*12,y+10,x,y+10)
                     p.drawPath(path)
+            elif len(self.definition.pins)==2:
+                # Silnik DC ma dwa zaciski; nie rysuj elektroniki i trzech
+                # pinów właściwych serwomechanizmowi.
+                line(-80,0,-24,0); line(24,0,80,0)
             else:
                 # Serwo zawiera elektronikę sterującą, ma zasilanie i PWM,
                 # nie należy rysować zwarcia między trzema wyprowadzeniami.
-                p.drawRect(QRectF(-65,-32,30,64))
-                for y in (-20,0,20):line(-80,y,-65,y)
-                line(-35,0,-24,0)
+                # Pins start at x=-80: this gives them exactly two 20-unit
+                # grid cells before reaching the controller enclosure.
+                controller=QRectF(-40,-32,30,64)
+                p.drawRect(controller)
+                for pin in self.definition.pins:
+                    line(pin.x,pin.y,controller.left(),pin.y)
+                line(controller.right(),0,motor_x-24,0)
                 font.setPixelSize(8); p.setFont(font)
-                p.drawText(QRectF(-63,-8,26,16),Qt.AlignmentFlag.AlignCenter,"CTRL")
+                p.drawText(QRectF(controller.left()+2,-8,controller.width()-4,16),Qt.AlignmentFlag.AlignCenter,"CTRL")
+                # Single labels sit above the longer leads. Pin numbers remain
+                # available from the component tooltip, not duplicated here.
+                font.setPixelSize(9); p.setFont(font)
+                for pin in self.definition.pins:
+                    p.drawText(QRectF(pin.x+1,pin.y-14,controller.left()-pin.x-2,12),
+                               Qt.AlignmentFlag.AlignCenter,pin.name)
+                self._bottom_labels(p)
+                return
         # Numery i nazwy przy wyprowadzeniach są krótkie; pełna lista znajduje
         # się też w podpowiedzi, niezależnie od widoczności nazwy elementu.
-        font=QFont("Arial"); font.setPixelSize(8); p.setFont(font)
+        font=QFont("Arial"); font.setPixelSize(9); p.setFont(font)
         fm=QFontMetricsF(font)
         for pin in self.definition.pins:
             text=f"{pin.number} {pin.name}"
-            left=pin.x+3 if pin.x<0 else pin.x-3-fm.horizontalAdvance(text)
-            self._pin_label(p, QPointF(left,pin.y-4), text)
+            width=fm.horizontalAdvance(text)
+            if pin.x < 0:
+                label=QRectF(pin.x-width-7,pin.y-7,width+2,14)
+                self._pin_label(p,label,text)
+            else:
+                label=QRectF(pin.x+7,pin.y-7,width+2,14)
+                self._pin_label(p,label,text)
         self._bottom_labels(p)
 
     def _pin_label(self, painter, position, text, base_angle=0):
@@ -849,25 +856,27 @@ class ComponentItem(QGraphicsObject):
             painter.drawRoundedRect(body,9,9)
             painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor('#263d50'))
             painter.drawRoundedRect(QRectF(body.left()+2,body.top()+3,body.width()-4,18),6,6)
-            chip=QRectF(body.left()+13,body.bottom()-34,34,24)
+            painter.setPen(QPen(QColor('#aab8c4'),1)); painter.setBrush(Qt.BrushStyle.NoBrush)
+            for inset in (7,11,15):
+                painter.drawRoundedRect(body.adjusted(inset,inset,-inset,-inset),7,7)
+            label_x=body.left()+21+34+7
+            label_width=max(0.0,body.right()-label_x-5)
+            id_rect=QRectF(label_x,body.top()+24,label_width,16)
+            rfid_rect=QRectF(label_x,id_rect.bottom(),label_width,18)
+            # Move only the chip: its 24-unit height matches the visible glyph
+            # bounds of both rows; the text rows themselves stay in place.
+            chip=QRectF(body.left()+21,body.top()+29,34,24)
             painter.setPen(QPen(QColor('#83692d'),1)); painter.setBrush(QColor('#dfc36f'))
             painter.drawRoundedRect(chip,4,4)
             painter.drawLine(QPointF(chip.center().x(),chip.top()),QPointF(chip.center().x(),chip.bottom()))
             painter.drawLine(QPointF(chip.left(),chip.center().y()),QPointF(chip.right(),chip.center().y()))
-            painter.setPen(QPen(QColor('#aab8c4'),1)); painter.setBrush(Qt.BrushStyle.NoBrush)
-            for inset in (7,11,15):
-                painter.drawRoundedRect(body.adjusted(inset,inset,-inset,-inset),7,7)
-            label_x=chip.right()+7
-            label_width=max(0.0,body.right()-label_x-5)
-            # The card ID goes above the RFID marking in the upper area to the
-            # chip's right, as indicated on the card-layout sketch.
+            # Keep both labels grouped immediately to the chip's right.
             painter.setPen(QColor('#243747'))
             font=painter.font(); font.setPixelSize(9); font.setBold(False); painter.setFont(font)
-            id_rect=QRectF(label_x,body.top()+24,label_width,16)
             painter.drawText(id_rect,Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,
                 str(self.component.properties.get('rfid_id','A1B2C3D4')))
             font.setPixelSize(11); font.setBold(True); painter.setFont(font)
-            painter.drawText(QRectF(label_x,id_rect.bottom(),label_width,18),
+            painter.drawText(rfid_rect,
                 Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,'RFID')
             painter.setPen(QPen(QColor('#254151'),2)); painter.setBrush(Qt.BrushStyle.NoBrush)
             for radius in (5,9,13):

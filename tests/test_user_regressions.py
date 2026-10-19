@@ -24,7 +24,7 @@ class WireRoutingRegressionTests(unittest.TestCase):
     def test_application_version(self):
         from app.ui.main_window import APP_VERSION
 
-        self.assertEqual(APP_VERSION, "1.3.1")
+        self.assertEqual(APP_VERSION, "1.4.0")
 
     def test_overlapping_wire_uses_nearest_shortest_legal_detour(self):
         from app.core.models import Sheet

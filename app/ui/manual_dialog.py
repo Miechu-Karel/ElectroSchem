@@ -8,15 +8,17 @@ class ManualDialog(QDialog):
         super().__init__(parent)
         pl=language=="pl"
         def t(en,polish): return polish if pl else en
-        self.setWindowTitle(t("Usage Instructions","Instrukcja Obsługi")); self.resize(760,640)
+        self.setWindowTitle(t("ElectroSchem 1.4.0 Usage Instructions","ElectroSchem 1.4.0 — Instrukcja obsługi")); self.resize(760,640)
         layout=QVBoxLayout(self); self.browser=QTextBrowser()
         shortcuts=[
             ("S","Select","Zaznaczanie"),("D","Draw wire","Rysuj połączenia"),
             ("X","Delete tool","Narzędzie usuwania"),
             ("Del","Delete selection","Usuń zaznaczenie"),("R","Rotate component","Obróć element"),
             ("Ctrl+Z","Undo","Cofnij"),("Ctrl+Y / Ctrl+Shift+Z","Redo","Ponów"),
-            ("Ctrl+S","Save","Zapisz"),("Ctrl+Shift+S","Save as","Zapisz jako"),
+            ("Ctrl+S","Save locally","Zapisz lokalnie"),("Ctrl+Shift+S","Save as","Zapisz jako"),
+            ("Alt+S","Save to default location (local or cloud)","Zapisz w domyślnym miejscu (lokalnie lub w chmurze)"),
             ("Ctrl+N","New project","Nowy projekt"),("Ctrl+O","Open project","Otwórz projekt"),
+            ("Alt+O","Open from default location (local or cloud)","Otwórz z domyślnego miejsca (lokalnie lub w chmurze)"),
             ("Ctrl+D","Duplicate selection","Duplikuj zaznaczenie"),
             ("Ctrl+X","Cut selection","Wytnij zaznaczenie"),("Ctrl+C","Copy selection","Kopiuj zaznaczenie"),
             ("Ctrl+V","Paste at cursor","Wklej przy kursorze"),
@@ -36,6 +38,9 @@ class ManualDialog(QDialog):
                 ("Hold the middle mouse button to pan the view.","Przytrzymaj kółko myszy, aby przesuwać widok."),
                 ("Drag with the right button to select a rectangle. Right-click cancels a wire in progress.","Przeciągnij PPM, aby zaznaczyć prostokątem. PPM anuluje rysowane połączenie."),
                 ("Drag a selected object to move the whole group, including free wire nodes. Duplicates are offset by one grid square.","Przeciągnij zaznaczony obiekt, aby przesunąć całą grupę, także wolne węzły przewodów. Duplikat jest przesunięty o kratkę.")]),
+            ("Wire editing","Edycja przewodów",[
+                ("The wire-color tool is only a visual aid. Choose a color when activating it; clicking a wire colors its unbranched connected run. It stops at a component pin or a junction with multiple possible wire continuations.","Narzędzie kolorowania przewodów służy wyłącznie czytelności. Przy jego włączaniu wybierz kolor; kliknięcie przewodu koloruje połączony, nierozgałęziony odcinek. Kolorowanie zatrzymuje się na pinie elementu albo w węźle z kilkoma możliwymi dalszymi przewodami."),
+                ("Every cable endpoint that is not attached to a component pin or another wire has a visible node marker. A two-wire bend does not get an extra junction dot.","Każdy koniec przewodu, który nie jest podłączony do pinu elementu ani innego przewodu, ma widoczny węzeł. Zwykłe zagięcie z dwoma przewodami nie dostaje dodatkowej kropki rozgałęzienia.")]),
             ("Sheets and project information","Arkusze i dane projektu",[
                 ("Double-click the title, author or sheet name in the drawing table to edit directly. Enter confirms; Shift+Enter adds a line.","Dwuklik tytułu, autora lub nazwy arkusza w tabliczce uruchamia edycję. Enter zatwierdza, Shift+Enter dodaje linię."),
                 ("Double-click a sheet tab to rename or delete it. Undo restores deleted sheets.","Dwuklik zakładki arkusza pozwala zmienić nazwę lub usunąć arkusz. Cofnij przywraca usunięty arkusz."),
@@ -60,6 +65,10 @@ class ManualDialog(QDialog):
             ("The assistant can answer questions and explain concepts. Circuit drawing and the editor terminal are hidden in this release. Cloud requests require consent and may incur API fees; local AI requires a running local model. Settings includes a local-AI setup guide.", "Asystent odpowiada na pytania i wyjaśnia zagadnienia. Rysowanie schematów i terminal edytora są ukryte w tym wydaniu. Zapytania do chmury wymagają zgody i mogą powodować opłaty API; lokalne AI wymaga uruchomionego modelu. Ustawienia zawierają poradnik konfiguracji lokalnego AI."),
             ("C selects the comment tool; Ctrl+C still copies. Tact switches and keypad keys stay closed while held. Move the mouse over PIR to activate it. Drag the joystick knob with LMB; hold RMB or SW for HIGH, release for LOW. Physical active-LOW mode is optional.", "C wybiera narzędzie komentarza; Ctrl+C nadal kopiuje. Przyciski tact i klawisze keypada są zwarte podczas przytrzymywania. Przesuń mysz nad PIR, aby go uruchomić. Gałkę pada przeciągaj LPM; przytrzymaj PPM lub SW, aby uzyskać HIGH, puść dla LOW. Fizyczny tryb aktywny LOW jest opcjonalny."),
             ("Enable the Raspberry Pi console in properties, then click the Pi to show/hide simulated Python output. It is not a Raspberry Pi OS shell.", "Włącz konsolę Raspberry Pi we właściwościach i klikaj Pi, aby pokazać lub ukryć wyjście symulowanego Pythona. To nie powłoka Raspberry Pi OS.")]))
+        sections.append(("Cloud projects", "Projekty w chmurze", [
+            ("In Settings > Cloud, select a provider to see its matching setup guide directly below the fields. The guide explains required credentials, folder format, account permissions and the provider sign-in step. Select No cloud to disable cloud access and keep projects local.", "W Ustawienia > Chmura wybierz dostawcę, aby zobaczyć pasującą do niego instrukcję pod polami. Zawiera wymagane dane, format folderu, uprawnienia i sposób logowania. Wybierz Brak chmury, aby wyłączyć chmurę i pracować lokalnie."),
+            ("After connecting, Alt+O and Alt+S use the selected default location; Ctrl+O and Ctrl+S always use local files. Only ELS files are listed, and the configured folder must already exist. Cloud credentials stay local and are never included in a project.", "Po połączeniu Alt+O i Alt+S używają wybranego domyślnego miejsca, a Ctrl+O i Ctrl+S zawsze obsługują pliki lokalne. Wyświetlane są tylko pliki ELS; wskazany folder musi już istnieć. Dane logowania pozostają lokalnie i nigdy nie trafiają do projektu."),
+            ("When GitHub is selected, the configured branch is pulled at startup if it can fast-forward. Every successful project save creates a commit; Push and Pull remain manual from the File > GitHub menu.", "Po wybraniu GitHuba aplikacja przy uruchomieniu pobiera skonfigurowaną gałąź, jeśli można ją szybko przewinąć. Każdy udany zapis projektu tworzy commit; Push i Pull uruchamia się ręcznie z menu Plik > GitHub.")]))
         for en,polish,items in sections:
             html+="<h2>"+t(en,polish)+"</h2><ul>"+"".join("<li>"+escape(t(a,b))+"</li>" for a,b in items)+"</ul>"
         from app.ui.local_ai_guide import guide_html

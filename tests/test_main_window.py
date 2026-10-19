@@ -14,6 +14,8 @@ from app.core.project_file import load_project
 from app.core.settings import AppSettings
 from app.libraries.built_in import BUILT_IN_ITEMS
 from app.ui.main_window import APP_VERSION, MainWindow
+from app.ui.settings_dialog import SettingsDialog
+from app.services.cloud_storage import CloudProjectFile
 
 APP = QApplication.instance() or QApplication([])
 RESISTOR = next(item for item in BUILT_IN_ITEMS if item.name == "Rezystor")
@@ -36,7 +38,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_version_localization_icons_and_no_properties_dock(self):
         window = self.window
-        self.assertEqual(APP_VERSION, "1.3.1")
+        self.assertEqual(APP_VERSION, "1.4.0")
         self.assertFalse(window.windowIcon().isNull())
         self.assertEqual({(size.width(), size.height())
                           for size in window.windowIcon().availableSizes()},
@@ -51,6 +53,37 @@ class MainWindowTests(unittest.TestCase):
         window._translate_ui()
         self.assertEqual(window.tools_heading.text(), "PODSTAWOWE NARZĘDZIA")
         self.assertEqual(window.new_action.text(), "Nowy projekt…")
+        self.assertEqual(window.quick_save_action.shortcut().toString(), "Alt+S")
+        self.assertEqual(window.quick_open_action.shortcut().toString(), "Alt+O")
+        self.assertNotIn("Alt+S", window.quick_save_action.text())
+        self.assertNotIn("Alt+O", window.quick_open_action.text())
+
+    def test_cloud_settings_show_provider_specific_guide_and_no_cloud(self):
+        dialog = SettingsDialog(AppSettings(language="pl"))
+        try:
+            providers = [dialog.cloud_provider.itemData(i)
+                         for i in range(dialog.cloud_provider.count())]
+            self.assertEqual(providers, ["none", "github", "google_drive", "onedrive"])
+            self.assertIn("zwykły Dysk Google", dialog.cloud_note.text())
+            self.assertIn("publiczny", dialog.cloud_note.text())
+            self.assertIn("Google Cloud Storage", dialog.cloud_note.text())
+            dialog.cloud_provider.setCurrentIndex(dialog.cloud_provider.findData("onedrive"))
+            self.assertIn("Microsoft Entra", dialog.cloud_note.text())
+            self.assertNotIn("Dropbox", dialog.cloud_note.text())
+            self.assertNotIn("Nextcloud", dialog.cloud_note.text())
+            self.assertNotIn("Google Cloud Console", dialog.cloud_note.text())
+            dialog.cloud_provider.setCurrentIndex(dialog.cloud_provider.findData("github"))
+            self.assertIn("lokalnego klonu repozytorium", dialog.cloud_note.text())
+            self.assertTrue(dialog.cloud_form.isRowVisible(dialog.github_repository_url))
+            self.assertFalse(dialog.cloud_form.isRowVisible(dialog.cloud_folder))
+            self.assertFalse(dialog.cloud_form.isRowVisible(dialog.cloud_connect_button))
+            dialog.cloud_provider.setCurrentIndex(dialog.cloud_provider.findData("none"))
+            self.assertEqual(dialog.cloud_default.currentData(), "local")
+            self.assertFalse(dialog.cloud_default.isEnabled())
+            self.assertFalse(dialog.cloud_form.isRowVisible(dialog.cloud_connect_button))
+            self.assertIn("Chmura jest wyłączona", dialog.cloud_note.text())
+        finally:
+            dialog.close()
 
     def test_add_undo_redo_sheets_and_document_save(self):
         window = self.window
@@ -110,6 +143,34 @@ class MainWindowTests(unittest.TestCase):
             self.assertFalse(window._write_project(Path("new.els")))
         self.assertEqual(window.current_file, Path("original.els"))
         self.assertTrue(window._is_dirty())
+
+    def test_alt_save_overwrites_open_cloud_project_without_filename_prompt(self):
+        window = self.window
+        window.settings.cloud_provider = "google_drive"
+        window.current_cloud_provider = "google_drive"
+        window.current_cloud_file = CloudProjectFile("drive-file-id", "Circuit.els")
+        with patch.object(window, "_start_cloud_operation") as start, \
+             patch("app.ui.main_window.QInputDialog.getText") as prompt:
+            window.save_cloud_project()
+        prompt.assert_not_called()
+        operation = start.call_args.args[0]
+        with patch("app.core.project_file.project_bytes", return_value=b"test-els"), \
+             patch("app.services.cloud_storage.CloudStorageClient.upload", return_value=window.current_cloud_file) as upload:
+            operation(window.settings)
+        self.assertEqual(upload.call_args.args[0], "Circuit.els")
+        self.assertEqual(upload.call_args.args[2], "drive-file-id")
+
+    def test_rotated_cloud_token_is_saved_even_when_followup_request_fails(self):
+        window = self.window
+        window._cloud_busy = True
+        window._cloud_progress = type("Progress", (), {"close": lambda self: None})()
+        window.settings.cloud_tokens = {"google_drive": {"refresh_token": "old"}}
+        rotated = {"google_drive": {"refresh_token": "rotated"}}
+        with patch("app.ui.main_window.save_settings") as save, patch.object(window, "_error") as show_error:
+            window._finish_cloud_operation((None, rotated), RuntimeError("provider error"), lambda _: self.fail("must not load"))
+        self.assertEqual(window.settings.cloud_tokens, rotated)
+        save.assert_called_once_with(window.settings)
+        show_error.assert_called_once()
 
     def test_ai_context_contains_pin_indices_without_api_key(self):
         window = self.window

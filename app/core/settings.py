@@ -79,6 +79,18 @@ class AppSettings:
     editor_path: str = ""
     default_directory: str = field(default_factory=documents_directory)
     default_code_directory: str = field(default_factory=default_code_directory)
+    # Cloud-project storage is opt-in; local files remain the safe default.
+    cloud_default_location: str = "local"
+    cloud_provider: str = "google_drive"
+    cloud_folder: str = ""
+    google_drive_client_id: str = ""
+    google_drive_client_secret: str = field(default="", repr=False)
+    onedrive_client_id: str = ""
+    cloud_tokens: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
+    # GitHub sync operates on the local project folder through installed Git.
+    # Credentials remain in Git Credential Manager, never in ElectroSchem.
+    github_repository_url: str = ""
+    github_branch: str = "main"
     gemini_model: str = "auto"
     ai_provider: str = "gemini"
     openai_model: str = "gpt-6-astra"
@@ -87,6 +99,7 @@ class AppSettings:
     local_ai_token: str = field(default='',repr=False)
     rotation_direction: str = 'cw'
     wires_through_cases: bool = False
+    wire_paint_color: str = "#167d3d"
     openai_api_key: str = field(default="", repr=False)
     # repr=False zapobiega przypadkowemu wypisaniu sekretu podczas diagnostyki.
     api_key: str = field(default="", repr=False)
@@ -197,11 +210,23 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
         raw=json.loads(str(store.value('ai_request_consents','{}')))
         if isinstance(raw,dict): result.ai_request_consents={k:True for k,v in raw.items() if k in {'gemini','openai','local'} and v is True}
     except (ValueError,TypeError): pass
-    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "ai_provider", "openai_model", "local_ai_url", "local_ai_model", "default_directory", "default_code_directory", "default_author", "window_mode", "theme", "fault_effect"):
+    for name in ("language", "standard", "paper_size", "orientation", "editor_path", "gemini_model", "ai_provider", "openai_model", "local_ai_url", "local_ai_model", "default_directory", "default_code_directory", "default_author", "window_mode", "theme", "fault_effect", "cloud_default_location", "cloud_provider", "cloud_folder", "google_drive_client_id", "onedrive_client_id", "github_repository_url", "github_branch"):
         setattr(result, name, str(store.value(name, getattr(result, name))))
+    if not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", result.github_branch) or result.github_branch.startswith(("-", "/")) or result.github_branch.endswith(("/", ".")) or ".." in result.github_branch or "//" in result.github_branch or "@{" in result.github_branch:
+        result.github_branch = "main"
+    if result.cloud_default_location not in {"local", "cloud"}:
+        result.cloud_default_location = "local"
+    if result.cloud_provider in {"dropbox", "nextcloud"}:
+        result.cloud_provider = "none"
+    elif result.cloud_provider not in {"google_drive", "onedrive", "github", "none"}:
+        result.cloud_provider = "google_drive"
+    if result.cloud_provider == "none":
+        result.cloud_default_location = "local"
     result.scope_size=str(store.value('scope_size',result.scope_size))
     result.rotation_direction=str(store.value('rotation_direction','cw'))
     result.wires_through_cases=str(store.value('wires_through_cases','false')).lower() in ('true','1')
+    paint_color = str(store.value('wire_paint_color', result.wire_paint_color))
+    result.wire_paint_color = paint_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", paint_color) else AppSettings().wire_paint_color
     if result.rotation_direction not in {'cw','ccw'}: result.rotation_direction='cw'
     if result.scope_size not in {'normal','large','huge'}: result.scope_size='normal'
     from math import isfinite
@@ -245,6 +270,22 @@ def load_settings(store: QSettings | None = None) -> AppSettings:
     if local_encrypted:
         try: result.local_ai_token=_dpapi(base64.b64decode(str(local_encrypted),validate=True),decrypt=True).decode('utf-8')
         except (OSError,ValueError,UnicodeError): result.local_ai_token=''
+    cloud_encrypted = store.value("cloud_secrets_dpapi", "")
+    if cloud_encrypted:
+        try:
+            raw_cloud = json.loads(_dpapi(base64.b64decode(str(cloud_encrypted), validate=True), decrypt=True).decode("utf-8"))
+            if isinstance(raw_cloud, dict):
+                result.google_drive_client_secret = str(raw_cloud.get("google_drive_client_secret", ""))[:2000]
+                tokens = raw_cloud.get("cloud_tokens", {})
+                if isinstance(tokens, dict):
+                    result.cloud_tokens = {
+                        str(provider): {str(k): str(v)[:10000] for k, v in token.items() if isinstance(k, str) and isinstance(v, (str, int, float))}
+                        for provider, token in tokens.items()
+                        if provider in {"google_drive", "onedrive"} and isinstance(token, dict)
+                    }
+        except (OSError, ValueError, UnicodeError, TypeError):
+            result.google_drive_client_secret = ""
+            result.cloud_tokens = {}
     if openai_encrypted:
         try:
             result.openai_api_key = _dpapi(base64.b64decode(str(openai_encrypted), validate=True), decrypt=True).decode("utf-8")
@@ -293,14 +334,28 @@ def save_settings(settings: AppSettings, store: QSettings | None = None) -> None
     encrypted = base64.b64encode(_dpapi(settings.api_key.encode("utf-8"))).decode("ascii") if settings.api_key else ""
     openai_encrypted = base64.b64encode(_dpapi(settings.openai_api_key.encode("utf-8"))).decode("ascii") if settings.openai_api_key else ""
     local_encrypted=base64.b64encode(_dpapi(settings.local_ai_token.encode('utf-8'))).decode('ascii') if settings.local_ai_token else ''
+    cloud_secrets = {
+        "google_drive_client_secret": settings.google_drive_client_secret,
+        "cloud_tokens": {provider: token for provider, token in settings.cloud_tokens.items()
+                          if provider in {"google_drive", "onedrive"}},
+    }
+    cloud_encrypted = (base64.b64encode(_dpapi(json.dumps(cloud_secrets, ensure_ascii=False).encode("utf-8"))).decode("ascii")
+                      if settings.google_drive_client_secret or cloud_secrets["cloud_tokens"] else "")
     store = store if store is not None else settings_store()
     for name in ("language", "standard", "paper_size", "orientation", "grid_visible",
-                 "editor_path", "gemini_model", "ai_provider", "openai_model", "local_ai_url", "local_ai_model", "setup_complete", "default_directory", "default_code_directory", "ai_chat_consent", "default_author", "dramatic_faults", "window_mode", "theme", "fault_effect",'scope_size','stop_on_fault','scope_volts_div','scope_time_div','scope_autoscale'):
+                 "editor_path", "gemini_model", "ai_provider", "openai_model", "local_ai_url", "local_ai_model", "setup_complete", "default_directory", "default_code_directory", "ai_chat_consent", "default_author", "dramatic_faults", "window_mode", "theme", "fault_effect",'scope_size','stop_on_fault','scope_volts_div','scope_time_div','scope_autoscale', "cloud_default_location", "cloud_provider", "cloud_folder", "google_drive_client_id", "onedrive_client_id", "github_repository_url", "github_branch"):
         store.setValue(name, getattr(settings, name))
+    for removed_provider_key in ("dropbox_app_key", "dropbox_redirect_uri", "nextcloud_url", "nextcloud_username", "nextcloud_app_password"):
+        store.remove(removed_provider_key)
+    store.remove("github_auto_pull")
     store.setValue('rotation_direction',settings.rotation_direction)
     store.setValue('wires_through_cases',settings.wires_through_cases)
+    color = settings.wire_paint_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", str(settings.wire_paint_color)) else AppSettings().wire_paint_color
+    store.setValue('wire_paint_color', color)
     if local_encrypted: store.setValue('local_key_dpapi',local_encrypted)
     else: store.remove('local_key_dpapi')
+    if cloud_encrypted: store.setValue("cloud_secrets_dpapi", cloud_encrypted)
+    else: store.remove("cloud_secrets_dpapi")
     store.remove('local_ai_token')
     store.setValue("default_display_names", json.dumps(settings.default_display_names, ensure_ascii=False))
     store.setValue("default_component_values", json.dumps(settings.default_component_values, ensure_ascii=False))

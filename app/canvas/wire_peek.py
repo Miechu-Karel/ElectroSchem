@@ -13,8 +13,12 @@ def draw(painter,symbols,wires,color):
                 path=path.united(shape_path(shape))
         else: path.addRect(item.connector_body())
         clip=clip.united(item.sceneTransform().map(path))
-    painter.save(); painter.setClipPath(clip); painter.setOpacity(.32); painter.setPen(QPen(QColor(color),2))
-    for item in wires: painter.drawPath(item.path())
+    painter.save(); painter.setClipPath(clip); painter.setOpacity(.32)
+    for item in wires:
+        custom=getattr(item,'paint_color',None)
+        ink=QColor(custom if isinstance(custom,str) and custom else color)
+        if not ink.isValid(): ink=QColor(color)
+        painter.setPen(QPen(ink,2)); painter.drawPath(item.path())
     for item in symbols:
         if not item.asset_payload: continue
         scale=1.0
